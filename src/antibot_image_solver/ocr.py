@@ -15,6 +15,11 @@ class OcrRuntimeError(RuntimeError):
     pass
 
 
+def get_ocr_profile() -> str:
+    profile = os.getenv("ANTIBOT_OCR_PROFILE", "full").strip().lower()
+    return profile if profile in {"full", "fast"} else "full"
+
+
 def ensure_tesseract_available() -> str:
     path = shutil.which("tesseract")
     if not path:
@@ -24,16 +29,19 @@ def ensure_tesseract_available() -> str:
 
 def pil_variants(png_bytes: bytes) -> list[bytes]:
     variants = [png_bytes]
+    profile = get_ocr_profile()
     try:
         image = Image.open(io.BytesIO(png_bytes)).convert("L")
         prepared = [image]
-        for threshold in (110, 150):
+        thresholds = (110, 150) if profile == "full" else (130,)
+        scales = (6, 8, 10) if profile == "full" else (8,)
+        for threshold in thresholds:
             bw = image.point(lambda value, thr=threshold: 255 if value > thr else 0)
             prepared.append(bw)
             prepared.append(ImageOps.invert(bw))
         seen: set[bytes] = set()
         for base_image in prepared:
-            for scale in (6, 8, 10):
+            for scale in scales:
                 resized = base_image.resize(
                     (base_image.width * scale, base_image.height * scale),
                     Image.Resampling.NEAREST,
@@ -51,6 +59,8 @@ def pil_variants(png_bytes: bytes) -> list[bytes]:
 
 def ocr_candidates_from_bytes(png_bytes: bytes, *, language: Optional[str] = None) -> list[str]:
     ensure_tesseract_available()
+    profile = get_ocr_profile()
+    psm_modes = (6, 7, 8, 10, 13) if profile == "full" else (7, 8, 13)
     results: list[str] = []
     seen: set[str] = set()
     for data in pil_variants(png_bytes):
@@ -58,7 +68,7 @@ def ocr_candidates_from_bytes(png_bytes: bytes, *, language: Optional[str] = Non
             tmp.write(data)
             tmp_path = tmp.name
         try:
-            for psm in (6, 7, 8, 10, 13):
+            for psm in psm_modes:
                 command = ["tesseract", tmp_path, "stdout", "--psm", str(psm)]
                 if language:
                     command += ["-l", language]

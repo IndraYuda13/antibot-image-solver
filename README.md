@@ -52,6 +52,16 @@ pip install -U pip
 pip install -e .
 ```
 
+## OCR speed profiles
+
+By default the OCR pipeline uses the `full` profile for maximum recall. For short-lived live challenges where speed matters more than extra OCR passes, set:
+
+```bash
+export ANTIBOT_OCR_PROFILE=fast
+```
+
+`fast` reduces preprocessing variants and Tesseract pass count so the caller can submit sooner on sites with tight anti-bot/session windows.
+
 Optional browser tools:
 
 ```bash
