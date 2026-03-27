@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+NUMBER_WORDS = {
+    "0": "zero",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+    "10": "ten",
+}
+WORD_NUMBERS = {v: k for k, v in NUMBER_WORDS.items()}
+ANIMAL_WORDS = {
+    "ant",
+    "cat",
+    "cow",
+    "dog",
+    "elephant",
+    "fox",
+    "lion",
+    "monkey",
+    "mouse",
+    "tiger",
+}
+
+
+def roman_to_int(token: str) -> Optional[int]:
+    token = token.upper().strip()
+    if not token or not re.fullmatch(r"[IVXLCDM]+", token):
+        return None
+    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    total = 0
+    prev = 0
+    for ch in reversed(token):
+        value = values[ch]
+        if value < prev:
+            total -= value
+        else:
+            total += value
+            prev = value
+    return total
+
+
+def eval_simple_expr(token: str) -> Optional[str]:
+    token = token.lower().replace("×", "x").replace("*", "x")
+    token = token.replace(" ", "")
+    match = re.fullmatch(r"(\d+)([+\-x])(\d+)", token)
+    if not match:
+        return None
+    left = int(match.group(1))
+    right = int(match.group(3))
+    op = match.group(2)
+    if op == "+":
+        return str(left + right)
+    if op == "-":
+        return str(left - right)
+    return str(left * right)
+
+
+def normalize_letters(text: str) -> str:
+    text = text.strip().lower()
+    replacements = {
+        "0": "o",
+        "1": "l",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "6": "g",
+        "7": "t",
+        "8": "b",
+        "9": "g",
+        "@": "a",
+        "$": "s",
+        "£": "f",
+        "€": "e",
+        "|": "l",
+        "!": "i",
+        "+": "t",
+    }
+    text = "".join(replacements.get(ch, ch) for ch in text)
+    text = re.sub(r"[^a-z, ]", "", text)
+    fixes = {
+        "slephent": "elephant",
+        "elephent": "elephant",
+        "elephont": "elephant",
+        "elephart": "elephant",
+        "tgerr": "tiger",
+        "teger": "tiger",
+        "tger": "tiger",
+        "f0x": "fox",
+        "d0g": "dog",
+        "m0use": "mouse",
+    }
+    return fixes.get(text, text)
+
+
+def canonical_forms(text: str) -> set[str]:
+    forms: set[str] = set()
+    raw = text.strip()
+    if not raw:
+        return forms
+
+    compact = re.sub(r"\s+", "", raw.lower())
+    if compact:
+        forms.add(compact)
+
+    alpha = normalize_letters(raw)
+    if alpha:
+        forms.add(alpha)
+        if alpha in WORD_NUMBERS:
+            forms.add(WORD_NUMBERS[alpha])
+
+    digit_variants = {raw}
+    replacements = {
+        "o": ("0",),
+        "O": ("0",),
+        "l": ("1",),
+        "I": ("1",),
+        "|": ("1",),
+        "s": ("5",),
+        "S": ("5",),
+        "z": ("2", "3"),
+        "Z": ("2", "3"),
+        "g": ("6",),
+        "G": ("6",),
+        "b": ("8",),
+        "B": ("8",),
+    }
+    for src, repls in replacements.items():
+        next_set = set()
+        for item in digit_variants:
+            if src in item:
+                for repl in repls:
+                    next_set.add(item.replace(src, repl))
+            next_set.add(item)
+        digit_variants = next_set
+
+    for variant in digit_variants:
+        cleaned = re.sub(r"[^0-9,+\-xX*×IVXLCDMivxlcdm]", "", variant)
+        if cleaned:
+            forms.add(cleaned.lower())
+        expr = eval_simple_expr(cleaned)
+        if expr is not None:
+            forms.add(expr)
+        roman_value = roman_to_int(cleaned)
+        if roman_value is not None:
+            forms.add(str(roman_value))
+        digits_only = re.sub(r"\D", "", cleaned)
+        if digits_only:
+            forms.add(digits_only)
+            forms.add(str(int(digits_only)))
+            if str(int(digits_only)) in NUMBER_WORDS:
+                forms.add(NUMBER_WORDS[str(int(digits_only))])
+
+    return {item for item in forms if item}
+
+
+def guess_family(tokens: list[str]) -> Optional[str]:
+    forms: set[str] = set()
+    for token in tokens:
+        forms |= canonical_forms(token)
+    if forms & ANIMAL_WORDS:
+        return "animals"
+    if any(re.fullmatch(r"\d+[+\-x]\d+", item) for item in forms):
+        return "arithmetic"
+    if any(item in WORD_NUMBERS for item in forms):
+        return "number_words"
+    if any(re.fullmatch(r"[ivxlcdm]+", item, re.I) for item in tokens if item.strip()):
+        return "roman_numerals"
+    if any(re.fullmatch(r"\d+", item) for item in forms):
+        return "numbers"
+    return None

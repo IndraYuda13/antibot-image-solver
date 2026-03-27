@@ -1,0 +1,6 @@
+beautifulsoup4>=4.12
+fastapi>=0.115
+Pillow>=10.0
+pydantic>=2.8
+requests>=2.31
+uvicorn>=0.30

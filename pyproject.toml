@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "antibot-image-solver"
+version = "0.1.0"
+description = "Standalone OCR + semantic matcher for anti-bot image ordering challenges."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Indra Yuda" }
+]
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "fastapi>=0.115",
+  "Pillow>=10.0",
+  "pydantic>=2.8",
+  "requests>=2.31",
+  "uvicorn>=0.30",
+]
+keywords = ["ocr", "antibot", "captcha", "solver", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+browser = [
+  "seleniumbase>=4.30",
+]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.0",
+  "pytest-mock>=3.14",
+  "requests-mock>=1.12",
+]
+
+[project.scripts]
+antibot-image-solver = "antibot_image_solver.cli:main"
+antibot-image-solver-api = "antibot_image_solver.api.app:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/antibot_image_solver"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Optional
+
+from antibot_image_solver.matcher import MatchEntry, MatchError, solve_from_hypotheses, solve_from_text_candidates
+from antibot_image_solver.models import AntibotChallenge, SolveDebug, SolveResult
+from antibot_image_solver.normalize import canonical_forms, guess_family
+from antibot_image_solver.ocr import OcrRuntimeError, ocr_candidates_from_base64
+
+
+class SolverError(RuntimeError):
+    pass
+
+
+class SolverInputError(SolverError):
+    pass
+
+
+class SolverLowConfidenceError(SolverError):
+    pass
+
+
+def analyze_instruction_image(instruction_image_base64: str) -> dict:
+    instruction_ocr = ocr_candidates_from_base64(instruction_image_base64)
+    family = guess_family(instruction_ocr)
+    tokens = []
+    if instruction_ocr:
+        from antibot_image_solver.matcher import extract_instruction_token_sets
+
+        token_sets = extract_instruction_token_sets(instruction_ocr, 3)
+        if token_sets:
+            tokens = token_sets[0]
+    return {
+        "ocr": {
+            "raw_variants": instruction_ocr,
+            "best_text": instruction_ocr[0] if instruction_ocr else None,
+        },
+        "tokens": tokens,
+        "family_guess": family,
+    }
+
+
+def _challenge_to_entries(challenge: AntibotChallenge) -> list[MatchEntry]:
+    entries: list[MatchEntry] = []
+    for option in challenge.options:
+        candidates = list(option.text_candidates)
+        if not candidates:
+            candidates = ocr_candidates_from_base64(option.image_base64)
+        forms = set(option.canonical_forms)
+        if not forms:
+            for candidate in candidates:
+                forms |= canonical_forms(candidate)
+        display = option.id
+        if candidates:
+            display = candidates[0]
+        entries.append(
+            MatchEntry(
+                id=option.id,
+                display=display,
+                candidates=candidates,
+                forms=forms,
+            )
+        )
+    return entries
+
+
+def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> SolveResult:
+    if not challenge.instruction_image_base64:
+        raise SolverInputError("instruction_image_base64 is required")
+    if not challenge.options and not challenge.candidates:
+        raise SolverInputError("either options or candidates must be provided")
+
+    try:
+        instruction_ocr = ocr_candidates_from_base64(challenge.instruction_image_base64)
+    except OcrRuntimeError as exc:
+        raise SolverError(str(exc)) from exc
+
+    if not instruction_ocr:
+        return SolveResult(
+            success=False,
+            status="uncertain",
+            confidence=0.0,
+            error_code="OCR_EMPTY",
+            error_message="instruction OCR returned no candidates",
+        )
+
+    try:
+        if challenge.options:
+            entries = _challenge_to_entries(challenge)
+            outcome = solve_from_hypotheses(instruction_ocr, entries)
+        else:
+            outcome = solve_from_text_candidates(instruction_ocr, challenge.candidates)
+    except (MatchError, OcrRuntimeError) as exc:
+        return SolveResult(
+            success=False,
+            status="uncertain",
+            confidence=0.0,
+            family=guess_family(instruction_ocr),
+            tokens_detected=[],
+            error_code="LOW_CONFIDENCE",
+            error_message=str(exc),
+            debug=SolveDebug(instruction_ocr=instruction_ocr),
+        )
+
+    debug_payload = None
+    if debug:
+        debug_payload = SolveDebug(
+            instruction_ocr=instruction_ocr,
+            instruction_token_sets=outcome.instruction_token_sets,
+            option_ocr=outcome.option_ocr,
+            option_forms=outcome.option_forms,
+            best_score=outcome.best_score,
+            second_best_score=outcome.second_best_score,
+        )
+
+    return SolveResult(
+        success=True,
+        status="solved",
+        ordered_ids=outcome.ordered_ids,
+        ordered_candidates=outcome.ordered_candidates,
+        indexes_1based=outcome.indexes_1based,
+        confidence=outcome.confidence,
+        family=guess_family(outcome.tokens_detected),
+        tokens_detected=outcome.tokens_detected,
+        debug=debug_payload,
+        meta={
+            "domain_hint": challenge.domain_hint,
+            "mode": "option_images" if challenge.options else "text_candidates",
+        },
+    )
