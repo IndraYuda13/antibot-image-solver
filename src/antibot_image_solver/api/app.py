@@ -4,9 +4,10 @@ import uvicorn
 from fastapi import FastAPI
 
 from antibot_image_solver import __version__
+from antibot_image_solver.api.schemas import AnalyzeRequest, ErrorPayload, SolveRequest, SolveResponse
+from antibot_image_solver.capture import CaptureRequest
 from antibot_image_solver.models import AntibotChallenge, OptionImage
 from antibot_image_solver.solver import analyze_instruction_image, solve_challenge
-from antibot_image_solver.api.schemas import AnalyzeRequest, ErrorPayload, SolveRequest, SolveResponse
 
 app = FastAPI(title="antibot-image-solver", version=__version__)
 
@@ -33,7 +34,17 @@ def solve_antibot_image(payload: SolveRequest) -> SolveResponse:
         domain_hint=payload.domain_hint,
         request_id=payload.request_id,
     )
-    result = solve_challenge(challenge, debug=payload.debug)
+    capture = None
+    if payload.capture is not None:
+        capture = CaptureRequest(
+            output_dir=payload.capture.output_dir,
+            verdict=payload.capture.verdict,
+            source="api",
+            notes=payload.capture.notes,
+            tags=payload.capture.tags,
+            challenge_id=payload.capture.challenge_id,
+        )
+    result = solve_challenge(challenge, debug=payload.debug, capture=capture)
     data = result.to_dict(include_debug=payload.debug)
     return SolveResponse(
         success=data["success"],
@@ -44,6 +55,7 @@ def solve_antibot_image(payload: SolveRequest) -> SolveResponse:
         meta=data.get("meta") or {},
         error=ErrorPayload(**data["error"]) if data.get("error") else None,
         debug=data.get("debug"),
+        capture=data.get("capture"),
     )
 
 

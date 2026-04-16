@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Optional
-
+from antibot_image_solver.capture import CaptureRequest, persist_capture
 from antibot_image_solver.matcher import MatchEntry, MatchError, solve_from_hypotheses, solve_from_text_candidates
 from antibot_image_solver.models import AntibotChallenge, SolveDebug, SolveResult
 from antibot_image_solver.normalize import canonical_forms, guess_family
@@ -19,6 +17,19 @@ class SolverInputError(SolverError):
 
 class SolverLowConfidenceError(SolverError):
     pass
+
+
+def _attach_capture(
+    challenge: AntibotChallenge,
+    result: SolveResult,
+    capture: CaptureRequest | None,
+    *,
+    include_debug: bool,
+) -> SolveResult:
+    if capture is None:
+        return result
+    result.capture = persist_capture(challenge, result, capture, include_debug=include_debug)
+    return result
 
 
 def analyze_instruction_image(instruction_image_base64: str) -> dict:
@@ -65,7 +76,7 @@ def _challenge_to_entries(challenge: AntibotChallenge) -> list[MatchEntry]:
     return entries
 
 
-def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> SolveResult:
+def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture: CaptureRequest | None = None) -> SolveResult:
     if not challenge.instruction_image_base64:
         raise SolverInputError("instruction_image_base64 is required")
     if not challenge.options and not challenge.candidates:
@@ -77,13 +88,14 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> Solv
         raise SolverError(str(exc)) from exc
 
     if not instruction_ocr:
-        return SolveResult(
+        result = SolveResult(
             success=False,
             status="uncertain",
             confidence=0.0,
             error_code="OCR_EMPTY",
             error_message="instruction OCR returned no candidates",
         )
+        return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)
 
     try:
         if challenge.options:
@@ -92,7 +104,7 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> Solv
         else:
             outcome = solve_from_text_candidates(instruction_ocr, challenge.candidates)
     except (MatchError, OcrRuntimeError) as exc:
-        return SolveResult(
+        result = SolveResult(
             success=False,
             status="uncertain",
             confidence=0.0,
@@ -102,6 +114,7 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> Solv
             error_message=str(exc),
             debug=SolveDebug(instruction_ocr=instruction_ocr),
         )
+        return _attach_capture(challenge, result, capture, include_debug=True)
 
     debug_payload = None
     if debug:
@@ -114,7 +127,7 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> Solv
             second_best_score=outcome.second_best_score,
         )
 
-    return SolveResult(
+    result = SolveResult(
         success=True,
         status="solved",
         ordered_ids=outcome.ordered_ids,
@@ -129,3 +142,4 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False) -> Solv
             "mode": "option_images" if challenge.options else "text_candidates",
         },
     )
+    return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)

@@ -93,6 +93,19 @@ antibot-image-solver solve-image \
   --json
 ```
 
+Capture a labeled benchmark record while solving:
+
+```bash
+antibot-image-solver solve-image \
+  --image ./samples/instruction.png \
+  --candidates dog,cat,mouse \
+  --capture-dir ./captures/claimcoin \
+  --capture-verdict success \
+  --capture-tags claimcoin,live \
+  --capture-challenge-id claimcoin-20260416-001 \
+  --json
+```
+
 Solve from an instruction image plus option images:
 
 ```bash
@@ -127,7 +140,12 @@ curl -s http://127.0.0.1:8010/solve/antibot-image \
     "instruction_image_base64": "...",
     "candidates": ["dog", "cat", "mouse"],
     "domain_hint": "earncryptowrs",
-    "debug": true
+    "debug": true,
+    "capture": {
+      "output_dir": "./captures/claimcoin",
+      "verdict": "uncertain",
+      "tags": ["claimcoin", "api"]
+    }
   }'
 ```
 
@@ -148,12 +166,62 @@ curl -s http://127.0.0.1:8010/solve/antibot-image \
   }'
 ```
 
+## Durable capture workflow
+
+When `capture` is enabled from CLI or API, the solver writes:
+
+- `CAPTURE_DIR/index.jsonl`, append-only benchmark index
+- `CAPTURE_DIR/<challenge_id>/record.json`, full challenge input + solver output/debug payload
+
+Each `record.json` contains:
+
+- raw instruction image base64
+- raw option image base64 values when option-image mode is used
+- text candidates
+- solver result payload
+- solver internals when debug or capture is enabled
+- a caller-supplied verdict label: `success`, `reject_antibot`, `reject_captcha_or_session`, or `uncertain`
+
+This is meant for replay, offline evaluation, and postmortem analysis when Boskuu's ClaimCoin flow rejects a solve even though the OCR looked plausible.
+
+## ClaimCoin integration sketch
+
+ClaimCoin can call the local API after it has already collected the challenge images in browser automation:
+
+1. POST `instruction_image_base64` plus either `candidates` or `options[].image_base64`.
+2. Set `request_id` to the ClaimCoin job/challenge id.
+3. Include `capture.output_dir` and a provisional verdict like `uncertain`.
+4. After submit, rewrite or recapture the final label from ClaimCoin's observed outcome:
+   - `success` when claim passes
+   - `reject_antibot` when the antibot checker rejects the order
+   - `reject_captcha_or_session` when upstream captcha/session state failed first
+   - `uncertain` when the outcome is still ambiguous
+
+Minimal API payload shape for ClaimCoin:
+
+```json
+{
+  "request_id": "claimcoin-job-123",
+  "instruction_image_base64": "...",
+  "candidates": ["dog", "cat", "mouse"],
+  "domain_hint": "claimcoin",
+  "capture": {
+    "output_dir": "./captures/claimcoin",
+    "verdict": "uncertain",
+    "tags": ["claimcoin", "prod"]
+  }
+}
+```
+
+The response includes `capture.record_path`, so ClaimCoin can correlate the browser outcome with the stored benchmark artifact.
+
 ## Project layout
 
 ```text
 src/antibot_image_solver/
   api/                 FastAPI app and schemas
   adapters/            Site-specific parser adapters
+  capture.py           Persistent capture/index writer for benchmarking
   cli.py               CLI entrypoint
   matcher.py           Permutation scoring and order solving
   models.py            Shared dataclasses

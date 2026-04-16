@@ -53,7 +53,12 @@ You can solve in two ways.
   "instruction_image_base64": "...",
   "candidates": ["dog", "cat", "mouse"],
   "domain_hint": "earncryptowrs",
-  "debug": true
+  "debug": true,
+  "capture": {
+    "output_dir": "./captures/claimcoin",
+    "verdict": "uncertain",
+    "tags": ["claimcoin"]
+  }
 }
 ```
 
@@ -90,6 +95,11 @@ You can solve in two ways.
     "domain_hint": "earncryptowrs",
     "mode": "option_images"
   },
+  "capture": {
+    "challenge_id": "claimcoin-job-123",
+    "record_path": "captures/claimcoin/claimcoin-job-123/record.json",
+    "index_path": "captures/claimcoin/index.jsonl"
+  },
   "debug": {
     "instruction_ocr": ["four, three, two"],
     "instruction_token_sets": [["four", "three", "two"]]
@@ -116,3 +126,5 @@ You can solve in two ways.
 - This service solves the image-to-order problem only.
 - It does not handle login, session state, browser clicks, or target-site telemetry.
 - `domain_hint` is optional metadata. It can help future site-specific tuning without changing the generic API contract.
+- `capture` is optional. When provided, the service persists a replayable benchmark artifact with raw inputs, solver internals, and a caller-supplied verdict label.
+- Allowed verdict labels are `success`, `reject_antibot`, `reject_captcha_or_session`, and `uncertain`.

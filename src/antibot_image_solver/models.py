@@ -21,6 +21,7 @@ class AntibotChallenge:
     request_id: Optional[str] = None
 
 
+
 @dataclass
 class SolveDebug:
     instruction_ocr: list[str] = field(default_factory=list)
@@ -48,6 +49,7 @@ class SolveResult:
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     meta: dict[str, Any] = field(default_factory=dict)
+    capture: Optional[dict[str, Any]] = None
 
     def to_dict(self, *, include_debug: bool = True) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -72,4 +74,6 @@ class SolveResult:
             }
         if include_debug and self.debug is not None:
             payload["debug"] = self.debug.to_dict()
+        if self.capture is not None:
+            payload["capture"] = self.capture
         return payload
