@@ -4,7 +4,7 @@ from antibot_image_solver.capture import CaptureRequest, persist_capture
 from antibot_image_solver.matcher import MatchEntry, MatchError, solve_from_hypotheses, solve_from_text_candidates
 from antibot_image_solver.models import AntibotChallenge, SolveDebug, SolveResult
 from antibot_image_solver.normalize import canonical_forms, guess_family
-from antibot_image_solver.ocr import OcrRuntimeError, ocr_candidates_from_base64
+from antibot_image_solver.ocr import OcrRuntimeError, get_ocr_profile, ocr_candidates_from_base64
 
 
 class SolverError(RuntimeError):
@@ -52,12 +52,12 @@ def analyze_instruction_image(instruction_image_base64: str) -> dict:
     }
 
 
-def _challenge_to_entries(challenge: AntibotChallenge) -> list[MatchEntry]:
+def _challenge_to_entries(challenge: AntibotChallenge, *, ocr_profile: str | None = None) -> list[MatchEntry]:
     entries: list[MatchEntry] = []
     for option in challenge.options:
         candidates = list(option.text_candidates)
         if not candidates:
-            candidates = ocr_candidates_from_base64(option.image_base64)
+            candidates = ocr_candidates_from_base64(option.image_base64, profile=ocr_profile)
         forms = set(option.canonical_forms)
         if not forms:
             for candidate in candidates:
@@ -76,35 +76,29 @@ def _challenge_to_entries(challenge: AntibotChallenge) -> list[MatchEntry]:
     return entries
 
 
-def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture: CaptureRequest | None = None) -> SolveResult:
-    if not challenge.instruction_image_base64:
-        raise SolverInputError("instruction_image_base64 is required")
-    if not challenge.options and not challenge.candidates:
-        raise SolverInputError("either options or candidates must be provided")
-
+def _solve_challenge_once(challenge: AntibotChallenge, *, debug: bool = False, ocr_profile: str | None = None) -> SolveResult:
     try:
-        instruction_ocr = ocr_candidates_from_base64(challenge.instruction_image_base64)
+        instruction_ocr = ocr_candidates_from_base64(challenge.instruction_image_base64, profile=ocr_profile)
     except OcrRuntimeError as exc:
         raise SolverError(str(exc)) from exc
 
     if not instruction_ocr:
-        result = SolveResult(
+        return SolveResult(
             success=False,
             status="uncertain",
             confidence=0.0,
             error_code="OCR_EMPTY",
             error_message="instruction OCR returned no candidates",
         )
-        return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)
 
     try:
         if challenge.options:
-            entries = _challenge_to_entries(challenge)
+            entries = _challenge_to_entries(challenge, ocr_profile=ocr_profile)
             outcome = solve_from_hypotheses(instruction_ocr, entries)
         else:
             outcome = solve_from_text_candidates(instruction_ocr, challenge.candidates)
     except (MatchError, OcrRuntimeError) as exc:
-        result = SolveResult(
+        return SolveResult(
             success=False,
             status="uncertain",
             confidence=0.0,
@@ -114,7 +108,6 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture
             error_message=str(exc),
             debug=SolveDebug(instruction_ocr=instruction_ocr),
         )
-        return _attach_capture(challenge, result, capture, include_debug=True)
 
     debug_payload = None
     if debug:
@@ -127,7 +120,7 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture
             second_best_score=outcome.second_best_score,
         )
 
-    result = SolveResult(
+    return SolveResult(
         success=True,
         status="solved",
         ordered_ids=outcome.ordered_ids,
@@ -140,6 +133,26 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture
         meta={
             "domain_hint": challenge.domain_hint,
             "mode": "option_images" if challenge.options else "text_candidates",
+            "ocr_profile": ocr_profile or get_ocr_profile(),
         },
     )
+
+
+def _accept_turbo_result(result: SolveResult) -> bool:
+    return result.success and result.confidence >= 0.56
+
+
+def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture: CaptureRequest | None = None) -> SolveResult:
+    if not challenge.instruction_image_base64:
+        raise SolverInputError("instruction_image_base64 is required")
+    if not challenge.options and not challenge.candidates:
+        raise SolverInputError("either options or candidates must be provided")
+
+    profile = get_ocr_profile()
+    if profile == "fast" and challenge.options:
+        result = _solve_challenge_once(challenge, debug=debug, ocr_profile="turbo")
+        if not _accept_turbo_result(result):
+            result = _solve_challenge_once(challenge, debug=debug, ocr_profile="fast")
+    else:
+        result = _solve_challenge_once(challenge, debug=debug, ocr_profile=profile)
     return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)

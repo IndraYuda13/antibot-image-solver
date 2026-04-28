@@ -65,7 +65,7 @@ def test_persist_capture_rejects_unknown_verdict(tmp_path):
 
 
 def test_solve_challenge_attaches_capture(monkeypatch, tmp_path):
-    monkeypatch.setattr("antibot_image_solver.solver.ocr_candidates_from_base64", lambda _: ["cat dog"])
+    monkeypatch.setattr("antibot_image_solver.solver.ocr_candidates_from_base64", lambda _, **kwargs: ["cat dog"])
     monkeypatch.setattr("antibot_image_solver.solver.solve_from_text_candidates", lambda *_: DummyOutcome())
 
     result = solve_challenge(

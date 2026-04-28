@@ -19,14 +19,20 @@ NUMBER_WORDS = {
 WORD_NUMBERS = {v: k for k, v in NUMBER_WORDS.items()}
 ANIMAL_WORDS = {
     "ant",
+    "camel",
     "cat",
     "cow",
+    "crab",
+    "deer",
     "dog",
+    "duck",
     "elephant",
     "fox",
     "lion",
     "monkey",
     "mouse",
+    "panda",
+    "rabbit",
     "tiger",
 }
 
@@ -91,12 +97,34 @@ def normalize_letters(text: str) -> str:
         "elephent": "elephant",
         "elephont": "elephant",
         "elephart": "elephant",
+        "sephe nt": "elephant",
+        "sephent": "elephant",
+        "sephant": "elephant",
+        "srephant": "elephant",
+        "meaphimt": "elephant",
+        "eepnany": "elephant",
+        "eiepnan": "elephant",
+        "beenary": "elephant",
+        "bopnay": "elephant",
         "tgerr": "tiger",
         "teger": "tiger",
         "tger": "tiger",
         "f0x": "fox",
         "d0g": "dog",
         "m0use": "mouse",
+        "morkey": "monkey",
+        "morey": "monkey",
+        "pende": "panda",
+        "pgnde": "panda",
+        "pend": "panda",
+        "panaa": "panda",
+        "para": "panda",
+        "tox": "fox",
+        "lox": "fox",
+        "geir": "deer",
+        "aeer": "deer",
+        "aver": "deer",
+        "drr": "deer",
     }
     return fixes.get(text, text)
 
@@ -114,8 +142,15 @@ def canonical_forms(text: str) -> set[str]:
     alpha = normalize_letters(raw)
     if alpha:
         forms.add(alpha)
+        alpha_plain = alpha.strip(", ")
+        if alpha_plain:
+            forms.add(alpha_plain)
         if alpha in WORD_NUMBERS:
             forms.add(WORD_NUMBERS[alpha])
+        if alpha_plain in WORD_NUMBERS:
+            forms.add(WORD_NUMBERS[alpha_plain])
+        if alpha_plain in ANIMAL_WORDS:
+            return {item for item in forms if item}
 
     digit_variants = {raw}
     replacements = {

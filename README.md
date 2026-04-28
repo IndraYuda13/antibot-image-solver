@@ -60,7 +60,9 @@ By default the OCR pipeline uses the `full` profile for maximum recall. For shor
 export ANTIBOT_OCR_PROFILE=fast
 ```
 
-`fast` reduces preprocessing variants and Tesseract pass count so the caller can submit sooner on sites with tight anti-bot/session windows.
+`fast` now uses a two-stage path for option-image challenges: first it tries a `turbo` OCR pass and accepts only high-confidence matches, then falls back to the fuller fast pass when confidence is lower. This keeps easy ClaimCoin-style cases quick without trusting weak low-confidence OCR.
+
+Tesseract subprocesses are capped by `ANTIBOT_OCR_TIMEOUT_SECONDS`, default `3.0`, so one slow OCR pass cannot hang an entire claim indefinitely.
 
 Optional browser tools:
 
