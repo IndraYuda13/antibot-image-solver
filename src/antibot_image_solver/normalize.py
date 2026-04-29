@@ -125,6 +125,23 @@ def normalize_letters(text: str) -> str:
         "aeer": "deer",
         "aver": "deer",
         "drr": "deer",
+        # ClaimCoin live OCR confusions from rejected option-image samples.
+        # Keep these narrow: they map distorted instruction tokens to option OCR forms
+        # seen in the same challenge family, avoiding broad numeric alias matches.
+        "pnk": "pin",
+        "blk": "bk",
+        "ik": "bk",
+        "uv": "ww",
+        "luv": "ww",
+        "iuv": "ww",
+        "ouy": "yy",
+        "quy": "yy",
+        "aor": "got",
+        "pan": "pen",
+        "pon": "pen",
+        "top": "op",
+        "aip": "cvp",
+        "aup": "cvp",
     }
     return fixes.get(text, text)
 

@@ -44,3 +44,33 @@ def test_claimcoin_elephant_ocr_confusions_pick_tiger_elephant_monkey_order():
 def test_confidence_is_positive_on_clear_match():
     result = solve_from_text_candidates(["one two three"], ["three", "one", "two"])
     assert result.confidence > 0
+
+
+def test_claimcoin_reject_confusions_pick_pin_org_bk_order():
+    entries = [
+        MatchEntry(id="6592", display="slot-pin", candidates=["pin", "pln", "—_"], forms=canonical_forms("pin") | canonical_forms("pln") | canonical_forms("—_")),
+        MatchEntry(id="6756", display="slot-bk", candidates=["bk", "a", "_"], forms=canonical_forms("bk") | canonical_forms("a") | canonical_forms("_")),
+        MatchEntry(id="8463", display="slot-org", candidates=["Org", "a"], forms=canonical_forms("Org") | canonical_forms("a")),
+    ]
+    result = solve_from_hypotheses(["pnk, org, blk.", "pak, org, ik"], entries)
+    assert result.ordered_ids == ["6592", "8463", "6756"]
+
+
+def test_claimcoin_reject_confusions_pick_ok_ww_yay_order():
+    entries = [
+        MatchEntry(id="3457", display="slot-yay", candidates=["yay", "Vely", "a"], forms=canonical_forms("yay") | canonical_forms("Vely") | canonical_forms("a")),
+        MatchEntry(id="4758", display="slot-ww", candidates=["Ww", "_"], forms=canonical_forms("Ww") | canonical_forms("_")),
+        MatchEntry(id="7800", display="slot-ok", candidates=["Ok", "—_"], forms=canonical_forms("Ok") | canonical_forms("—_")),
+    ]
+    result = solve_from_hypotheses(["OK, |UV, yay", "Ox, IUV, YAY"], entries)
+    assert result.ordered_ids == ["7800", "4758", "3457"]
+
+
+def test_claimcoin_accepted_confusions_keep_box_top_aip_order():
+    entries = [
+        MatchEntry(id="2541", display="slot-cvp", candidates=["Cvp", "cvp", "‘cyp", "a"], forms=canonical_forms("Cvp") | canonical_forms("cvp") | canonical_forms("‘cyp") | canonical_forms("a")),
+        MatchEntry(id="3838", display="slot-boe", candidates=["b0", "Oe", "nf", "‘bOe", "—"], forms=canonical_forms("b0") | canonical_forms("Oe") | canonical_forms("nf") | canonical_forms("‘bOe") | canonical_forms("—")),
+        MatchEntry(id="9651", display="slot-op", candidates=["ip", "op", "ty", "fp", "_"], forms=canonical_forms("ip") | canonical_forms("op") | canonical_forms("ty") | canonical_forms("fp") | canonical_forms("_")),
+    ]
+    result = solve_from_hypotheses(["box, top, aip", "box, top, aup"], entries)
+    assert result.ordered_ids == ["3838", "9651", "2541"]

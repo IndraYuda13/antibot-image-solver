@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from itertools import permutations
 from typing import Iterable, Optional
 
-from antibot_image_solver.normalize import canonical_forms
+from antibot_image_solver.normalize import NUMBER_WORDS, WORD_NUMBERS, canonical_forms, normalize_letters
 
 
 class MatchError(RuntimeError):
@@ -63,8 +63,24 @@ def fuzzy_text_score(token: str, candidates: Iterable[str]) -> float:
     return best
 
 
+def _is_numeric_alias(form: str) -> bool:
+    return form.isdigit() or form in NUMBER_WORDS.values()
+
+
+def _allow_numeric_alias_match(token: str, option_candidates: Iterable[str]) -> bool:
+    token_alpha = normalize_letters(token).strip(", ")
+    if any(ch.isdigit() for ch in token):
+        return True
+    if token_alpha in WORD_NUMBERS or token_alpha in NUMBER_WORDS.values():
+        return True
+    return any(any(ch.isdigit() for ch in candidate) for candidate in option_candidates)
+
+
 def token_option_score(token: str, want_forms: set[str], option_candidates: list[str], option_forms: set[str]) -> int:
-    score = len(want_forms & option_forms) * 100
+    overlap = want_forms & option_forms
+    if not _allow_numeric_alias_match(token, option_candidates):
+        overlap = {form for form in overlap if not _is_numeric_alias(form)}
+    score = len(overlap) * 100
     score += int(fuzzy_text_score(token, option_candidates) * 25)
     return score
 

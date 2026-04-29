@@ -1,5 +1,28 @@
 # Change Notes
 
+## 2026-04-29 - ClaimCoin reject-sample matcher correction stage 2
+
+- Trigger evidence:
+  - ClaimCoin run-loop passed the requested +20-claim checkpoint. Latest DB state reached attempt `474`.
+  - Latest 20 attempts after id `454`: 15 accepted, 5 `Invalid Anti-Bot Links`, success rate `75%`.
+  - The newest rejected captures showed wrong ordering on distorted random-text tokens, especially `pnk/org/blk` and `OK/|UV/yay` style samples.
+- Files touched:
+  - `src/antibot_image_solver/matcher.py`
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_matcher.py`
+- What changed:
+  - Added a scoring guard so numeric aliases like `0/zero/1/one` do not dominate alphabetic random-token matches unless the instruction token itself is numeric or number-word-like.
+  - Added narrow ClaimCoin OCR confusion mappings for live rejected samples: `pnk->pin`, `blk/ik->bk`, `uv/iuv/luv->ww`, `ouy/quy->yy`, `aor->got`, `pan/pon->pen`, plus accepted-sample guards `top->op`, `aip/aup->cvp`.
+  - Added regression tests for two rejected sample classes and one accepted sample that must not regress.
+- Verification:
+  - `tests/test_matcher.py`: 8 passed.
+  - Full test suite: 23 passed.
+  - Stored-debug replay on latest 30 accepted ClaimCoin captures: 0 mismatches.
+  - Stored-debug replay on latest rejected captures corrected attempts `465` and `474`; attempts `467`, `469`, and `473` still need more evidence/visual calibration before broader changes.
+- Do not casually remove:
+  - The numeric-alias guard. It prevents alphabetic random tokens from matching only because OCR letters resemble digits.
+  - The accepted-sample regression for `box/top/aip`; without it, a stricter alias patch can silently break a previously accepted live solve.
+
 ## 2026-04-29 - ClaimCoin OCR latency guard and turbo-first fast profile
 
 - Trigger evidence:
