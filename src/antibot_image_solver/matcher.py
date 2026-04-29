@@ -111,6 +111,10 @@ def token_option_score(token: str, want_forms: set[str], option_candidates: list
             score += 180
         if token_alpha == "seven" and any(c in {"q", "1", "4"} for c in lower_candidates):
             score += 420
+        if token_alpha == "seven" and top_candidate == "7":
+            score += 420
+        if token_alpha == "seven" and top_candidate in {"ly", "v", "l"}:
+            score -= 520
         if token_alpha in {"tvg", "five"} and top_candidate == "5":
             score += 320
         if token_alpha == "pan" and any(c in {"pen", "pon"} for c in lower_candidates):

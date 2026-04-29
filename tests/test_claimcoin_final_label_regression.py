@@ -121,3 +121,22 @@ def test_claimcoin_latest_live_reject_labels_from_772_window():
         ["uti, urn, Ulu"],
         {"1706": ["vn"], "2188": ["vt"], "3378": ["viv"]},
     ) == ["2188", "1706", "3378"]
+
+
+def test_claimcoin_post_813_live_reject_labels():
+    assert _solve(
+        ["toy, lid, key"],
+        {"3219": ["iy", "fy", "{Oy", "hy"], "3595": ["hay", "hay,", "Rdy"], "5361": ["Md", "i1d", "itd"]},
+    ) == ["3219", "5361", "3595"]
+    assert _solve(
+        ["two, One, seven", "two, one, seven"],
+        {"3777": ["Ly", "v", "l", "1", "7"], "3857": ["7", "Tt"], "8937": ["2"]},
+    ) == ["8937", "3777", "3857"]
+    assert _solve(
+        ["jin, jot, joy", "jin, jot. joy"],
+        {"4378": ["jOy", "joy"], "6673": ["int", "jt"], "7144": ["ln", "jn"]},
+    ) == ["7144", "6673", "4378"]
+    assert _solve(
+        ["hit. hen, hot", "hit. hen. hot"],
+        {"1565": [")", "vr", "Vit", "Wr"], "2299": ["ht", "At", "vir"], "7497": ["h8n", "AB", "|", "‘ABn,"]},
+    ) == ["2299", "7497", "1565"]

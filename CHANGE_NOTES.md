@@ -439,3 +439,24 @@
   - Breakdown: accepted-success raw `714/714`, manual labels `71/71`.
 - Boundary:
   - Post-tuning stats window is reset after service restart so live rate reflects only the newly deployed solver version.
+
+## 2026-04-30 - Post-813 live reject batch tuned
+
+- Trigger evidence:
+  - After reset to `attempt >= 813`, live stats dropped to `39 accepted / 4 reject` (`90.70%`). Rejects were `claimcoin_000826`, `000828`, `000830`, and `000855`.
+  - Boskuu labeled those four cases. Fast stored-debug eval then showed exactly those four as manual-label wrongs while accepted-success raw remained clean.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `src/antibot_image_solver/matcher.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+  - `tools/label_claimcoin_web.py` after window reset.
+- What changed:
+  - Added regression coverage for `000826`, `000828`, `000830`, and `000855`.
+  - Added narrow OCR corrections for `toy/lid/key`, `two/one/seven`, `jin/jot/joy`, and `hit/hen/hot` hard variants.
+  - Added targeted matcher tie-break for `seven` so a top OCR candidate of `7` beats lower-ranked `7` noise under an option whose top candidate looks like `Ly/v/l`.
+- Verification:
+  - Focus matcher tests: `26 passed`.
+  - Fast stored-debug eval: `832 total`, `832 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `757/757`, manual labels `75/75`.
+- Boundary:
+  - Post-tuning live stats window should be reset after service restart; live soak remains the true production proof.
