@@ -266,7 +266,7 @@ def build_eval_cases(include_accepted: bool, include_labeled: bool, accepted_lim
 
 
 
-def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int = 75) -> dict[str, Any]:
+def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int = 75, eval_mode: str = "current-ocr") -> dict[str, Any]:
     capture_rel = data.get("source_capture_path")
     if not capture_rel:
         raise RuntimeError("case has no source capture path")
@@ -274,7 +274,7 @@ def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int 
     if not capture_path.exists():
         raise RuntimeError(f"source capture not found: {capture_path}")
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "claimcoin_eval_one.py"), str(capture_path)],
+        [sys.executable, str(ROOT / "tools" / "claimcoin_eval_one.py"), str(capture_path), "--mode", eval_mode],
         cwd=str(ROOT),
         text=True,
         stdout=subprocess.PIPE,
@@ -286,8 +286,9 @@ def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int 
         raise RuntimeError((proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[-1000:])
     return json.loads(proc.stdout)
 
-def eval_one_item(item: dict[str, Any]) -> dict[str, Any]:
-    latest = latest_solver_payload_subprocess(item)
+def eval_one_item(item: dict[str, Any], *, eval_mode: str = "current-ocr") -> dict[str, Any]:
+    timeout = 20 if eval_mode == "stored-debug" else 75
+    latest = latest_solver_payload_subprocess(item, timeout_seconds=timeout, eval_mode=eval_mode)
     actual = [str(x) for x in (latest.get("submitted_answer_order") or [])]
     expected = [str(x) for x in (item.get("expected_order") or [])]
     passed = bool(expected) and actual == expected
@@ -328,10 +329,12 @@ def run_eval_job(
     include_labeled: bool,
     accepted_limit: int | None = None,
     workers: int = 2,
+    eval_mode: str = "stored-debug",
 ) -> None:
     JOB_STOP_PATH.unlink(missing_ok=True)
     started = time.time()
     workers = max(1, min(int(workers or 2), 3))
+    eval_mode = eval_mode if eval_mode in {"stored-debug", "current-ocr"} else "stored-debug"
     try:
         cases = build_eval_cases(include_accepted, include_labeled, accepted_limit)
         total = len(cases)
@@ -364,15 +367,16 @@ def run_eval_job(
                 "report_path": str(report_path),
                 "can_stop": can_stop,
                 "system_load": live_system_load(),
+                "eval_mode": eval_mode,
             }
 
-        write_job_status(status_payload(f"Prepared {total} cases. Starting {workers}-worker solver eval..."))
+        write_job_status(status_payload(f"Prepared {total} cases. Starting {workers}-worker {eval_mode} eval..."))
         next_index = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             while (next_index < total or running_cases) and not JOB_STOP_PATH.exists():
                 while next_index < total and len(running_cases) < workers and not JOB_STOP_PATH.exists():
                     item = cases[next_index]
-                    fut = executor.submit(eval_one_item, item)
+                    fut = executor.submit(eval_one_item, item, eval_mode=eval_mode)
                     running_cases[fut] = item
                     next_index += 1
                 write_job_status(status_payload(f"Running {len(running_cases)} case(s), done {done}/{total}: ok={ok}, wrong={wrong}, errors={errors}"))
@@ -458,6 +462,7 @@ def run_eval_job(
             "failures_sample": failures,
             "results": results,
             "system_load": live_system_load(),
+            "eval_mode": eval_mode,
         }
         report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
         write_job_status({
@@ -810,6 +815,7 @@ def jobs_start_eval(
     include_labeled: str = Form("1"),
     accepted_limit: str = Form(""),
     workers: int = Form(2),
+    eval_mode: str = Form("stored-debug"),
 ) -> RedirectResponse:
     require_auth(request)
     global JOB_THREAD
@@ -836,6 +842,7 @@ def jobs_start_eval(
                 "include_labeled": include_labeled == "1",
                 "accepted_limit": limit,
                 "workers": workers,
+                "eval_mode": eval_mode,
             },
             daemon=True,
         )
@@ -881,9 +888,9 @@ def stats_page(request: Request) -> str:
       {stat_card('Labeled total', labels['total'])}{stat_card('Checked', labels['checked'])}{stat_card('Solver exact', labels['solver_exact'], 'good')}{stat_card('Corrected by human', labels['corrected'], 'bad')}{stat_card('Label exact rate', str(labels['label_success_rate']) + '%', 'good')}
     </div></div>
     <div class='card'><h2>Retuning / testing job</h2><div class='help'>Fondasi job progress sudah ada. Tombol start retuning/testing akan disambung ke runner background berikutnya, jadi kalau web ditutup status tetap bisa dibaca lagi dari sini.</div>
-      <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Progress', str(progress) + '%')}{stat_card('Done / Total', str(job.get('done', 0)) + ' / ' + str(job.get('total', 0)))}{stat_card('Running', job.get('running', 0))}{stat_card('OK', job.get('ok', 0), 'good')}{stat_card('Wrong', job.get('wrong', 0), 'bad')}{stat_card('Errors', job.get('errors', 0), 'warn')}{stat_card('Live success', str(job.get('success_rate', 0)) + '%', 'good')}</div>
+      <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Mode', job.get('eval_mode') or '-')}{stat_card('Progress', str(progress) + '%')}{stat_card('Done / Total', str(job.get('done', 0)) + ' / ' + str(job.get('total', 0)))}{stat_card('Running', job.get('running', 0))}{stat_card('OK', job.get('ok', 0), 'good')}{stat_card('Wrong', job.get('wrong', 0), 'bad')}{stat_card('Errors', job.get('errors', 0), 'warn')}{stat_card('Live success', str(job.get('success_rate', 0)) + '%', 'good')}</div>
       <div class='progress'><span style='width:{progress}%'></span></div>
-      <form method='post' action='/jobs/start-eval?{q}'><input type='hidden' name='include_accepted' value='1'><input type='hidden' name='include_labeled' value='1'><label>Accepted raw limit, kosong = semua accepted selain yang sudah dilabel</label><input name='accepted_limit' value=''><label>Workers, default 2, max 3</label><select name='workers'><option value='2' selected>2 workers, recommended</option><option value='1'>1 worker</option><option value='3'>3 workers, heavier</option></select><p><button>Start full eval: accepted success raw + labels</button></p></form>
+      <form method='post' action='/jobs/start-eval?{q}'><input type='hidden' name='include_accepted' value='1'><input type='hidden' name='include_labeled' value='1'><label>Accepted raw limit, kosong = semua accepted selain yang sudah dilabel</label><input name='accepted_limit' value=''><label>Eval mode</label><select name='eval_mode'><option value='stored-debug' selected>Fast matcher replay from stored OCR cache/debug</option><option value='current-ocr'>Slow rerun current OCR</option></select><label>Workers, default 2, max 3</label><select name='workers'><option value='2' selected>2 workers, recommended for fast mode</option><option value='1'>1 worker</option><option value='3'>3 workers, heavier</option></select><p><button>Start full eval: accepted success raw + labels</button></p></form>
       <form method='post' action='/jobs/stop?{q}'><p><button class='danger' {'disabled' if not job.get('can_stop') else ''}>Stop current job</button></p></form>
       <details><summary>Failure sample / raw status JSON</summary><pre id='job-json'>{escape(json.dumps(job, ensure_ascii=False, indent=2))}</pre></details>
     </div>

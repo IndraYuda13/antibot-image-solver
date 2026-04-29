@@ -1,14 +1,66 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageOps
+
+
+def get_ocr_cache_dir() -> Path | None:
+    raw = os.getenv("ANTIBOT_OCR_CACHE_DIR", "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
+def _ocr_cache_key(png_bytes: bytes, *, language: Optional[str], profile: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(b"antibot-ocr-cache-v1\0")
+    digest.update(profile.encode())
+    digest.update(b"\0")
+    digest.update((language or "").encode())
+    digest.update(b"\0")
+    digest.update(png_bytes)
+    return digest.hexdigest()
+
+
+def _read_ocr_cache(png_bytes: bytes, *, language: Optional[str], profile: str) -> list[str] | None:
+    cache_dir = get_ocr_cache_dir()
+    if cache_dir is None:
+        return None
+    path = cache_dir / f"{_ocr_cache_key(png_bytes, language=language, profile=profile)}.json"
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("profile") != profile or payload.get("language") != (language or ""):
+        return None
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        return None
+    return [str(item) for item in candidates]
+
+
+def _write_ocr_cache(png_bytes: bytes, *, language: Optional[str], profile: str, candidates: list[str]) -> None:
+    cache_dir = get_ocr_cache_dir()
+    if cache_dir is None:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = cache_dir / f"{_ocr_cache_key(png_bytes, language=language, profile=profile)}.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"profile": profile, "language": language or "", "candidates": candidates}, ensure_ascii=False))
+        tmp.replace(path)
+    except OSError:
+        return
 
 
 class OcrRuntimeError(RuntimeError):
@@ -72,6 +124,9 @@ def ocr_candidates_from_bytes(png_bytes: bytes, *, language: Optional[str] = Non
     selected_profile = (profile or get_ocr_profile()).strip().lower()
     if selected_profile not in {"full", "fast", "turbo"}:
         selected_profile = "full"
+    cached = _read_ocr_cache(png_bytes, language=language, profile=selected_profile)
+    if cached is not None:
+        return cached
     psm_modes = (6, 7, 8, 10, 13) if selected_profile == "full" else ((7, 8) if selected_profile == "turbo" else (7, 8, 13))
     timeout_seconds = get_ocr_timeout_seconds()
     results: list[str] = []
@@ -103,6 +158,7 @@ def ocr_candidates_from_bytes(png_bytes: bytes, *, language: Optional[str] = Non
                 os.unlink(tmp_path)
             except OSError:
                 pass
+    _write_ocr_cache(png_bytes, language=language, profile=selected_profile, candidates=results)
     return results
 
 

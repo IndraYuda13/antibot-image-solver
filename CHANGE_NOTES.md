@@ -284,3 +284,23 @@
   - Conclusion: multi-worker support works, but full 675-case eval should use 1 worker by default on this VPS unless Boskuu explicitly accepts higher CPU load.
 - Do not casually remove:
   - Keep the `workers` guard at max 3. Tesseract OCR can spike heavily and saturate this VPS quickly.
+
+## 2026-04-29 - OCR cache and fast eval mode
+
+- Trigger evidence:
+  - Full OCR rerun eval was too slow and produced timeout errors under CPU load. Boskuu approved adding OCR cache plus a fast eval mode.
+- Files touched:
+  - `src/antibot_image_solver/ocr.py`
+  - `tools/claimcoin_eval_one.py`
+  - `tools/label_claimcoin_web.py`
+  - `tests/test_ocr_cache.py`
+- What changed:
+  - Added optional file-based OCR cache via `ANTIBOT_OCR_CACHE_DIR`, keyed by image bytes + OCR profile + language. This avoids repeating Tesseract work across reruns when current OCR mode is used.
+  - Added `stored-debug` eval mode to `claimcoin_eval_one.py`, which replays the current matcher against OCR debug already stored in raw captures. This is the fast tuning lane because it avoids rerunning Tesseract for every case.
+  - Web eval jobs now expose `Eval mode`: fast `stored-debug` or slow `current-ocr`.
+- Verification:
+  - New OCR cache test proves the second identical OCR call is served from cache.
+  - Fast eval smoke with accepted limit 20 + 20 manual labels completed 40 cases quickly: 32 ok, 8 wrong, 0 errors, 80.0% success.
+  - Full test suite: `32 passed`.
+- Do not casually remove:
+  - Keep `stored-debug` and `current-ocr` separate. Stored-debug is for fast matcher tuning; current-ocr is for slower end-to-end OCR validation.
