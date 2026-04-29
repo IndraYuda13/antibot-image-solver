@@ -175,7 +175,7 @@ def solver_stats_data() -> dict[str, Any]:
     return {
         "overall": verdict_stats(),
         "last_100": verdict_stats("id > ?", (max(0, max_id - 100),)),
-        "post_tuning_547": verdict_stats("id >= ?", (547,)),
+        "post_tuning_772": verdict_stats("id >= ?", (772,)),
         "max_id": max_id,
     }
 
@@ -883,7 +883,7 @@ def stats_page(request: Request) -> str:
     <div class='top'><div><h1>Solver performance center</h1><div class='tag'>live ClaimCoin attempts + labeled dataset evaluation</div></div><a class='btn btn2' href='/?{q}'>Back</a></div>
     {group('Overall raw live attempts', live['overall'])}
     {group('Recent live attempts, last 100', live['last_100'])}
-    {group('Post tuning window, attempt >= 547', live['post_tuning_547'])}
+    {group('Post tuning window, attempt >= 772', live['post_tuning_772'])}
     <div class='card'><h2>Label-based solver check</h2><div class='help'>Ini ngecek label yang sudah Boskuu save. Kalau solver order sama dengan correct order label, dihitung exact. Kalau belum ada label cukup banyak, angka ini belum final.</div><div class='grid'>
       {stat_card('Labeled total', labels['total'])}{stat_card('Checked', labels['checked'])}{stat_card('Solver exact', labels['solver_exact'], 'good')}{stat_card('Corrected by human', labels['corrected'], 'bad')}{stat_card('Label exact rate', str(labels['label_success_rate']) + '%', 'good')}
     </div></div>
