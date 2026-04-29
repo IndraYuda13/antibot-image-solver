@@ -114,3 +114,27 @@
 - Do not casually remove:
   - The narrower numeric-alias gate. Broad digit aliases were the root cause of many accepted-regression mismatches.
   - The narrow live OCR mappings. They are grounded in stored accepted captures and should remain regression-tested before edits.
+
+
+## 2026-04-29 - ClaimCoin manual AntiBot labeling queue
+
+- Trigger evidence:
+  - Boskuu wants a proper manual-label workflow for AntiBot question/option images so future Tesseract and matcher tuning can use ground-truth labels, not guesses.
+  - The target flow should prioritize rejected cases first, support 3 or 4 options automatically, ask whether solver reads are already correct using `Y/n/skip`, and keep skipped cases in queue.
+- Files touched:
+  - `tools/label_claimcoin_antibot.py`
+- What changed:
+  - Added an offline labeling helper with commands:
+    - `export --priority rejected --limit N`
+    - `label-next`
+    - `stats`
+  - Export decodes raw capture JSON base64 images into `state/antibot-labeling/images/<case_id>/` and writes queue JSON into `state/antibot-labeling/queue/`.
+  - `label-next` shows question image path, solver OCR, each option image path, solver option OCR, and prompts only `Y/n/skip`. If `n`, the user enters the corrected text; if `skip`, the case remains in queue.
+  - Correct order is auto-derived from labeled question tokens and option texts, then reviewed with `Y/n/skip`; manual order can be entered when needed.
+  - Labeled cases move from `queue/` to `labeled/`; raw capture JSON is never deleted.
+- Verification:
+  - Script byte-compiled successfully.
+  - Export smoke test created two rejected queue cases and decoded images: `claimcoin_000650` and `claimcoin_000541`.
+  - `stats` reported queue=2, labeled=0, skipped=0.
+- Do not casually remove:
+  - The raw-capture preservation rule. Queue files can move, but source captures are evidence and must remain auditable.
