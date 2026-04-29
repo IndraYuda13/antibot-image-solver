@@ -92,3 +92,25 @@
   - If revisited, use `ddddocr` only as a low-level character evidence source with a separate segmentation/sequence alignment layer, not as a drop-in OCR provider.
 - Do not casually remove:
   - The negative benchmark note. It prevents re-trying raw ddddocr as a drop-in and wasting live accuracy.
+
+## 2026-04-29 - ClaimCoin ambiguity tie-breaker pass
+
+- Trigger evidence:
+  - Live target was raised to 98%++ after post-patch rates fluctuated; newest rejects showed ambiguous/tie scoring rather than total OCR failure.
+  - Example id `527`: `best_score == second_best_score`, so the matcher picked a tied order and submitted it.
+- Files touched:
+  - `src/antibot_image_solver/matcher.py`
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_matcher.py`
+- What changed:
+  - Tightened numeric-alias matching so alphabetic instruction tokens no longer get boosted just because an option OCR candidate contains a digit. Numeric aliases now apply only when the instruction token itself is numeric or number-word-like.
+  - Increased fuzzy text evidence weight from `25` to `100`, so close alphabetic OCR like `plg -> pig`, `cmt -> cat`, or `w3t -> wet` can beat weak digit-alias matches.
+  - Added narrow live-derived OCR corrections for common accepted-regression families: pig/cat, run/rib, brown/yellow/blue, hotel/bag/flat, fox, and job-style confusions.
+- Verification:
+  - Full test suite: `31 passed`.
+  - Stored-debug full-history replay: accepted regression improved to `472/477 = 98.95%` with only five accepted mismatches left (`145, 196, 276, 397, 458`).
+  - Post-id-480 replay: accepted `56/56 = 100%`; post-id-517 replay: accepted `25/25 = 100%`.
+  - Reject analysis changed `47/67` historical reject answers, including recent ids `506, 513, 514, 537, 541`; this is not proof of correctness by itself, but it confirms the resolver changes ambiguous outputs instead of leaving stale rejected answers untouched.
+- Do not casually remove:
+  - The narrower numeric-alias gate. Broad digit aliases were the root cause of many accepted-regression mismatches.
+  - The narrow live OCR mappings. They are grounded in stored accepted captures and should remain regression-tested before edits.

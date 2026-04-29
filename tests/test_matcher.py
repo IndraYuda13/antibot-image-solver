@@ -74,3 +74,33 @@ def test_claimcoin_accepted_confusions_keep_box_top_aip_order():
     ]
     result = solve_from_hypotheses(["box, top, aip", "box, top, aup"], entries)
     assert result.ordered_ids == ["3838", "9651", "2541"]
+
+
+def test_claimcoin_tie_breaker_prefers_alpha_evidence_over_numeric_aliases():
+    entries = [
+        MatchEntry(id="9705", display="slot-off", candidates=["off", "O"], forms=canonical_forms("off") | canonical_forms("O")),
+        MatchEntry(id="8519", display="slot-mo", candidates=["M0", "mo"], forms=canonical_forms("M0") | canonical_forms("mo")),
+        MatchEntry(id="1526", display="slot-bad", candidates=["bad"], forms=canonical_forms("bad")),
+    ]
+    result = solve_from_hypotheses(["ort, M0, bad"], entries)
+    assert result.ordered_ids == ["9705", "8519", "1526"]
+
+
+def test_claimcoin_tie_breaker_repairs_common_live_words():
+    entries = [
+        MatchEntry(id="7392", display="slot-pig", candidates=["plg", "ply"], forms=canonical_forms("plg") | canonical_forms("ply")),
+        MatchEntry(id="7773", display="slot-cat", candidates=["cmt"], forms=canonical_forms("cmt")),
+        MatchEntry(id="4440", display="slot-bat", candidates=["‘bat"], forms=canonical_forms("‘bat")),
+    ]
+    result = solve_from_hypotheses(["pig, cat, bat"], entries)
+    assert result.ordered_ids == ["7392", "7773", "4440"]
+
+
+def test_claimcoin_tie_breaker_repairs_hotel_bag_flat_family():
+    entries = [
+        MatchEntry(id="7016", display="slot-hotel", candidates=["hot3l", "hOtsl"], forms=canonical_forms("hot3l") | canonical_forms("hOtsl")),
+        MatchEntry(id="7648", display="slot-bag", candidates=["beg", "bes"], forms=canonical_forms("beg") | canonical_forms("bes")),
+        MatchEntry(id="7963", display="slot-flat", candidates=["Filght", "fight"], forms=canonical_forms("Filght") | canonical_forms("fight")),
+    ]
+    result = solve_from_hypotheses(["notel, baa, flat"], entries)
+    assert result.ordered_ids == ["7016", "7648", "7963"]

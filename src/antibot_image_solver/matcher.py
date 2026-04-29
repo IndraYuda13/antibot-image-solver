@@ -71,9 +71,7 @@ def _allow_numeric_alias_match(token: str, option_candidates: Iterable[str]) -> 
     token_alpha = normalize_letters(token).strip(", ")
     if any(ch.isdigit() for ch in token):
         return True
-    if token_alpha in WORD_NUMBERS or token_alpha in NUMBER_WORDS.values():
-        return True
-    return any(any(ch.isdigit() for ch in candidate) for candidate in option_candidates)
+    return token_alpha in WORD_NUMBERS or token_alpha in NUMBER_WORDS.values()
 
 
 def token_option_score(token: str, want_forms: set[str], option_candidates: list[str], option_forms: set[str]) -> int:
@@ -81,7 +79,7 @@ def token_option_score(token: str, want_forms: set[str], option_candidates: list
     if not _allow_numeric_alias_match(token, option_candidates):
         overlap = {form for form in overlap if not _is_numeric_alias(form)}
     score = len(overlap) * 100
-    score += int(fuzzy_text_score(token, option_candidates) * 25)
+    score += int(fuzzy_text_score(token, option_candidates) * 100)
     return score
 
 
