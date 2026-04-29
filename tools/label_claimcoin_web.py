@@ -6,7 +6,10 @@ import json
 from html import escape
 import secrets
 import sqlite3
+import subprocess
+import threading
 import time
+import uuid
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,12 +38,16 @@ CLAIMCOIN_ROOT = DEFAULT_CLAIMCOIN_ROOT
 LABEL_ROOT = DEFAULT_LABEL_ROOT
 TOKEN_PATH = LABEL_ROOT / "web_auth_token.txt"
 JOB_STATUS_PATH = LABEL_ROOT / "jobs" / "solver_eval_status.json"
+JOB_STOP_PATH = LABEL_ROOT / "jobs" / "solver_eval_stop.flag"
+JOB_REPORTS_DIR = LABEL_ROOT / "jobs" / "reports"
+JOB_LOCK = threading.Lock()
+JOB_THREAD: threading.Thread | None = None
 
 app = FastAPI(title="ClaimCoin AntiBot Label Studio")
 
 
 def ensure_dirs() -> None:
-    for sub in ["queue", "labeled", "skipped", "images", "preview", "web", "jobs"]:
+    for sub in ["queue", "labeled", "skipped", "images", "preview", "web", "jobs", "jobs/reports"]:
         (LABEL_ROOT / sub).mkdir(parents=True, exist_ok=True)
 
 
@@ -189,11 +196,244 @@ def label_eval_data() -> dict[str, Any]:
 
 
 def job_status_data() -> dict[str, Any]:
+    return current_job_status()
+
+
+
+
+def write_job_status(payload: dict[str, Any]) -> None:
+    ensure_dirs()
+    payload = {**payload, "updated_at": time.time()}
+    JOB_STATUS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def current_job_status() -> dict[str, Any]:
+    ensure_dirs()
     if JOB_STATUS_PATH.exists():
-        return json.loads(JOB_STATUS_PATH.read_text())
-    return {"status": "idle", "kind": None, "progress": 0, "message": "Belum ada job retuning/testing aktif.", "updated_at": None}
+        try:
+            return json.loads(JOB_STATUS_PATH.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {"status": "idle", "kind": None, "progress": 0, "message": "Belum ada job aktif.", "updated_at": None}
 
 
+def case_id_from_attempt(attempt_id: int) -> str:
+    return f"claimcoin_{attempt_id:06d}"
+
+
+def accepted_ground_truth_from_capture(capture_rel: str) -> list[str]:
+    capture = load_capture(CLAIMCOIN_ROOT / capture_rel)
+    solver = capture.get("solver") or {}
+    order = solver.get("ordered_ids") or str(solver.get("antibotlinks") or "").split()
+    return [str(x) for x in order]
+
+
+def build_eval_cases(include_accepted: bool, include_labeled: bool, accepted_limit: int | None = None) -> list[dict[str, Any]]:
+    ensure_dirs()
+    cases: list[dict[str, Any]] = []
+    labeled_ids = {p.stem for p in labeled_files()}
+    if include_accepted:
+        con = sqlite3.connect(CLAIMCOIN_ROOT / "state" / "claimcoin.sqlite3")
+        query = "select id, capture_path from antibot_attempts where verdict='accepted_success' order by id asc"
+        rows = list(con.execute(query))
+        if accepted_limit:
+            rows = rows[:accepted_limit]
+        for attempt_id, capture_rel in rows:
+            cid = case_id_from_attempt(int(attempt_id))
+            if cid in labeled_ids:
+                continue
+            cases.append({
+                "case_id": cid,
+                "source": "accepted_success_raw",
+                "source_capture_path": capture_rel,
+                "expected_order": accepted_ground_truth_from_capture(capture_rel),
+            })
+    if include_labeled:
+        for path in labeled_files():
+            data = json.loads(path.read_text())
+            expected = [str(x) for x in ((data.get("manual_label") or {}).get("correct_answer_order") or [])]
+            if not expected:
+                continue
+            cases.append({
+                "case_id": data.get("case_id") or path.stem,
+                "source": "manual_label",
+                "source_capture_path": data.get("source_capture_path"),
+                "expected_order": expected,
+            })
+    return cases
+
+
+
+def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int = 75) -> dict[str, Any]:
+    capture_rel = data.get("source_capture_path")
+    if not capture_rel:
+        raise RuntimeError("case has no source capture path")
+    capture_path = CLAIMCOIN_ROOT / str(capture_rel)
+    if not capture_path.exists():
+        raise RuntimeError(f"source capture not found: {capture_path}")
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "claimcoin_eval_one.py"), str(capture_path)],
+        cwd=str(ROOT),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[-1000:])
+    return json.loads(proc.stdout)
+
+def run_eval_job(job_id: str, *, include_accepted: bool, include_labeled: bool, accepted_limit: int | None = None) -> None:
+    JOB_STOP_PATH.unlink(missing_ok=True)
+    started = time.time()
+    try:
+        cases = build_eval_cases(include_accepted, include_labeled, accepted_limit)
+        total = len(cases)
+        ok = wrong = errors = 0
+        by_source: dict[str, dict[str, int]] = {}
+        failures: list[dict[str, Any]] = []
+        report_path = JOB_REPORTS_DIR / f"{job_id}.json"
+        write_job_status({
+            "job_id": job_id,
+            "status": "running",
+            "kind": "stable_eval",
+            "progress": 0,
+            "message": f"Prepared {total} cases. Starting solver eval...",
+            "total": total,
+            "done": 0,
+            "ok": 0,
+            "wrong": 0,
+            "errors": 0,
+            "report_path": str(report_path),
+            "can_stop": True,
+        })
+        results: list[dict[str, Any]] = []
+        for idx, item in enumerate(cases, 1):
+            if JOB_STOP_PATH.exists():
+                write_job_status({
+                    "job_id": job_id,
+                    "status": "stopped",
+                    "kind": "stable_eval",
+                    "progress": int(((idx - 1) / total) * 100) if total else 100,
+                    "message": "Stopped by user.",
+                    "total": total,
+                    "done": idx - 1,
+                    "ok": ok,
+                    "wrong": wrong,
+                    "errors": errors,
+                    "report_path": str(report_path),
+                    "can_stop": False,
+                })
+                break
+            source = item["source"]
+            by_source.setdefault(source, {"total": 0, "ok": 0, "wrong": 0, "errors": 0})
+            by_source[source]["total"] += 1
+            write_job_status({
+                "job_id": job_id,
+                "status": "running",
+                "kind": "stable_eval",
+                "progress": int(((idx - 1) / total) * 100) if total else 100,
+                "message": f"Evaluating {idx}/{total}: {item.get('case_id')}",
+                "total": total,
+                "done": idx - 1,
+                "ok": ok,
+                "wrong": wrong,
+                "errors": errors,
+                "success_rate": pct(ok, idx - 1),
+                "by_source": by_source,
+                "failures_sample": failures,
+                "report_path": str(report_path),
+                "can_stop": True,
+            })
+            try:
+                latest = latest_solver_payload_subprocess(item)
+                actual = [str(x) for x in (latest.get("submitted_answer_order") or [])]
+                expected = [str(x) for x in (item.get("expected_order") or [])]
+                passed = bool(expected) and actual == expected
+                if passed:
+                    ok += 1
+                    by_source[source]["ok"] += 1
+                else:
+                    wrong += 1
+                    by_source[source]["wrong"] += 1
+                    if len(failures) < 80:
+                        failures.append({
+                            "case_id": item["case_id"],
+                            "source": source,
+                            "expected_order": expected,
+                            "actual_order": actual,
+                            "confidence": latest.get("confidence"),
+                            "question_text": latest.get("question_text"),
+                            "options_text": latest.get("options_text"),
+                        })
+                results.append({
+                    "case_id": item["case_id"],
+                    "source": source,
+                    "expected_order": expected,
+                    "actual_order": actual,
+                    "pass": passed,
+                    "confidence": latest.get("confidence"),
+                    "error": None,
+                })
+            except Exception as exc:
+                errors += 1
+                by_source[source]["errors"] += 1
+                err = {"case_id": item.get("case_id"), "source": source, "error": type(exc).__name__, "message": str(exc)}
+                results.append({**err, "pass": False})
+                if len(failures) < 80:
+                    failures.append(err)
+            if idx % 5 == 0 or idx == total:
+                write_job_status({
+                    "job_id": job_id,
+                    "status": "running",
+                    "kind": "stable_eval",
+                    "progress": int((idx / total) * 100) if total else 100,
+                    "message": f"Evaluated {idx}/{total}: ok={ok}, wrong={wrong}, errors={errors}",
+                    "total": total,
+                    "done": idx,
+                    "ok": ok,
+                    "wrong": wrong,
+                    "errors": errors,
+                    "success_rate": pct(ok, idx),
+                    "by_source": by_source,
+                    "failures_sample": failures,
+                    "report_path": str(report_path),
+                    "can_stop": True,
+                })
+        else:
+            summary = {
+                "job_id": job_id,
+                "status": "completed",
+                "kind": "stable_eval",
+                "started_at": started,
+                "finished_at": time.time(),
+                "total": total,
+                "ok": ok,
+                "wrong": wrong,
+                "errors": errors,
+                "success_rate": pct(ok, total),
+                "by_source": by_source,
+                "failures_sample": failures,
+                "results": results,
+            }
+            report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+            write_job_status({
+                **{k: v for k, v in summary.items() if k != "results"},
+                "progress": 100,
+                "message": f"Completed {total}: success={pct(ok, total)}%, wrong={wrong}, errors={errors}",
+                "report_path": str(report_path),
+                "can_stop": False,
+            })
+    except Exception as exc:
+        write_job_status({
+            "job_id": job_id,
+            "status": "error",
+            "kind": "stable_eval",
+            "progress": 0,
+            "message": f"Job error: {type(exc).__name__}: {exc}",
+            "can_stop": False,
+        })
 
 def latest_solver_payload(data: dict[str, Any]) -> dict[str, Any]:
     capture_rel = data.get("source_capture_path")
@@ -512,6 +752,62 @@ async def save_case(case_id: str, request: Request) -> RedirectResponse:
     return RedirectResponse(f"/labeled/{case_id}?{token_q(request)}", status_code=303)
 
 
+@app.get("/jobs/status")
+def jobs_status(request: Request) -> dict[str, Any]:
+    require_auth(request)
+    return current_job_status()
+
+
+@app.post("/jobs/start-eval")
+def jobs_start_eval(
+    request: Request,
+    include_accepted: str = Form("1"),
+    include_labeled: str = Form("1"),
+    accepted_limit: str = Form(""),
+) -> RedirectResponse:
+    require_auth(request)
+    global JOB_THREAD
+    with JOB_LOCK:
+        status = current_job_status()
+        if status.get("status") == "running" and JOB_THREAD and JOB_THREAD.is_alive():
+            return RedirectResponse(f"/stats?{token_q(request)}", status_code=303)
+        limit = int(accepted_limit) if str(accepted_limit).strip() else None
+        job_id = f"eval-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+        JOB_STOP_PATH.unlink(missing_ok=True)
+        write_job_status({
+            "job_id": job_id,
+            "status": "running",
+            "kind": "stable_eval",
+            "progress": 0,
+            "message": "Starting background eval job...",
+            "can_stop": True,
+        })
+        JOB_THREAD = threading.Thread(
+            target=run_eval_job,
+            kwargs={
+                "job_id": job_id,
+                "include_accepted": include_accepted == "1",
+                "include_labeled": include_labeled == "1",
+                "accepted_limit": limit,
+            },
+            daemon=True,
+        )
+        JOB_THREAD.start()
+    return RedirectResponse(f"/stats?{token_q(request)}", status_code=303)
+
+
+@app.post("/jobs/stop")
+def jobs_stop(request: Request) -> RedirectResponse:
+    require_auth(request)
+    ensure_dirs()
+    JOB_STOP_PATH.write_text(str(time.time()))
+    status = current_job_status()
+    status["message"] = "Stop requested. Waiting current case to finish..."
+    status["can_stop"] = False
+    write_job_status(status)
+    return RedirectResponse(f"/stats?{token_q(request)}", status_code=303)
+
+
 @app.get("/stats", response_class=HTMLResponse)
 def stats_page(request: Request) -> str:
     require_auth(request)
@@ -540,8 +836,22 @@ def stats_page(request: Request) -> str:
     <div class='card'><h2>Retuning / testing job</h2><div class='help'>Fondasi job progress sudah ada. Tombol start retuning/testing akan disambung ke runner background berikutnya, jadi kalau web ditutup status tetap bisa dibaca lagi dari sini.</div>
       <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Kind', job.get('kind') or '-')}{stat_card('Progress', str(progress) + '%')}{stat_card('Message', job.get('message') or '-')}</div>
       <div class='progress'><span style='width:{progress}%'></span></div>
-      <p><button class='btn btn2' disabled>Start label test, incoming</button> <button class='btn btn2' disabled>Start retune, incoming</button></p>
+      <form method='post' action='/jobs/start-eval?{q}'><input type='hidden' name='include_accepted' value='1'><input type='hidden' name='include_labeled' value='1'><label>Accepted raw limit, kosong = semua accepted selain yang sudah dilabel</label><input name='accepted_limit' value=''><p><button>Start full eval: accepted success raw + labels</button></p></form>
+      <form method='post' action='/jobs/stop?{q}'><p><button class='danger' {'disabled' if not job.get('can_stop') else ''}>Stop current job</button></p></form>
+      <details><summary>Failure sample / raw status JSON</summary><pre id='job-json'>{escape(json.dumps(job, ensure_ascii=False, indent=2))}</pre></details>
     </div>
+<script>
+async function refreshJob() {{
+  try {{
+    const res = await fetch('/jobs/status?{q}', {{ credentials: 'same-origin' }});
+    const job = await res.json();
+    const box = document.getElementById('job-json');
+    if (box) box.textContent = JSON.stringify(job, null, 2);
+    if (job.status === 'running') setTimeout(() => location.reload(), 7000);
+  }} catch (e) {{}}
+}}
+refreshJob();
+</script>
     """
     return html_page("Solver stats", body)
 

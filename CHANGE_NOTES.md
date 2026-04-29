@@ -248,3 +248,22 @@
   - Test suite: `31 passed`.
 - Do not casually remove:
   - Editing labeled cases must keep raw capture JSON untouched. Only the labeled JSON under `state/antibot-labeling/labeled/` should change.
+
+## 2026-04-29 - Web eval job center and stable snapshot
+
+- Trigger evidence:
+  - Boskuu asked to save the current stable solver before tuning, then evaluate all accepted-success raw captures plus the 20 manual labels from the web with real-time progress and stop controls.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+  - `tools/claimcoin_eval_one.py`
+  - `state/antibot-labeling/jobs/stable_snapshot_20260429_2319.json`
+- What changed:
+  - Created/pushed git tag `claimcoin-stable-pre-tuning-20260429-2319` at stable head `8c537ebaf6271d75d47ed7ce32081c37af7f1ca5` before eval/tuning work.
+  - Added web job endpoints: `/jobs/status`, `/jobs/start-eval`, `/jobs/stop`.
+  - Added stats-page controls to start full eval over accepted-success raw cases excluding already labeled cases plus manual labels, with optional accepted limit, live status JSON, progress, stop button, and report path.
+  - Added per-case subprocess runner `tools/claimcoin_eval_one.py` so slow OCR does not freeze the web app thread forever; progress updates before every case and each case has a subprocess timeout.
+- Verification:
+  - Small smoke eval with accepted limit 2 + labels started from the web, progress updated to active per-case status, and stop request was accepted.
+  - Test suite: `31 passed`.
+- Do not casually remove:
+  - Keep subprocess isolation for eval jobs. Direct in-thread OCR can make progress appear frozen and makes stop behavior poor.
