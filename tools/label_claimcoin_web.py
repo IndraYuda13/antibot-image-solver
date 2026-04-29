@@ -6,6 +6,7 @@ import json
 from html import escape
 import secrets
 import sqlite3
+import time
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,12 +30,13 @@ from label_claimcoin_antibot import (  # noqa: E402
 CLAIMCOIN_ROOT = DEFAULT_CLAIMCOIN_ROOT
 LABEL_ROOT = DEFAULT_LABEL_ROOT
 TOKEN_PATH = LABEL_ROOT / "web_auth_token.txt"
+JOB_STATUS_PATH = LABEL_ROOT / "jobs" / "solver_eval_status.json"
 
 app = FastAPI(title="ClaimCoin AntiBot Label Studio")
 
 
 def ensure_dirs() -> None:
-    for sub in ["queue", "labeled", "skipped", "images", "preview", "web"]:
+    for sub in ["queue", "labeled", "skipped", "images", "preview", "web", "jobs"]:
         (LABEL_ROOT / sub).mkdir(parents=True, exist_ok=True)
 
 
@@ -76,6 +78,7 @@ h1{{font-size:28px;margin:0;letter-spacing:-.04em}} h2{{margin:0 0 10px}} .tag{{
 .card{{background:linear-gradient(180deg,var(--panel),#101511);border:1px solid var(--line);border-radius:18px;padding:18px;margin:14px 0;box-shadow:0 18px 60px #0008}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}} .stat{{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px}}
 .stat b{{font-size:28px;color:var(--accent)}} button,.btn{{background:var(--accent);color:#071008;border:0;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}}
+.stat.good b{{color:var(--good)}} .stat.bad b{{color:var(--bad)}} .stat.warn b{{color:var(--warn)}}
 .btn2{{background:#233027;color:var(--ink);border:1px solid var(--line)}} .danger{{background:var(--bad);color:#200}}
 input,textarea,select{{width:100%;background:#0b100d;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}}
 label{{display:block;color:var(--muted);font-size:12px;margin:9px 0 5px}} img{{max-width:100%;background:white;border-radius:10px;border:1px solid #334}}
@@ -88,6 +91,8 @@ pre{{white-space:pre-wrap;color:#cfe6d2;background:#09100c;border:1px solid var(
 .order-board{{display:grid;grid-template-columns:1fr 1fr;gap:14px}} .chipbox{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;min-height:54px;padding:12px;background:#0b100d;border:1px solid var(--line);border-radius:14px}}
 .order-chip{{background:#d7ff92;color:#071008;border:0;border-radius:999px;padding:10px 13px;font-weight:900;cursor:pointer;box-shadow:0 8px 22px #0008}}
 .order-chip.used{{opacity:.35;filter:grayscale(1)}} .answer-slot{{display:flex;gap:8px;align-items:center;background:#1f2b23;border:1px solid #3e5144;border-radius:999px;padding:7px 10px}}
+.changed-note{{display:none;color:var(--warn);font-size:12px;margin-top:5px}} .field-changed .changed-note{{display:block}}
+.progress{{height:16px;background:#09100c;border:1px solid var(--line);border-radius:999px;overflow:hidden}} .progress span{{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--good));width:0}}
 .answer-slot button{{padding:2px 7px;border-radius:999px;background:#ff6b6b;color:#230000}} .mono{{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
 @media(max-width:720px){{.option,.order-board{{grid-template-columns:1fr}}.wrap{{padding:14px}}}}
 </style></head><body><div class="wrap">{body}</div></body></html>"""
@@ -117,12 +122,17 @@ def load_labeled(case_id: str) -> tuple[Path, dict[str, Any]]:
     return path, json.loads(path.read_text())
 
 
+def pct(part: int, total: int) -> float:
+    return round((part / total) * 100, 2) if total else 0.0
+
+
 def stats_data() -> dict[str, Any]:
     ensure_dirs()
     con = sqlite3.connect(CLAIMCOIN_ROOT / "state" / "claimcoin.sqlite3")
     total = con.execute("select count(*) from antibot_attempts").fetchone()[0]
     accepted = con.execute("select count(*) from antibot_attempts where verdict='accepted_success'").fetchone()[0]
     rejected = con.execute("select count(*) from antibot_attempts where verdict='server_reject_antibot'").fetchone()[0]
+    errors = total - accepted - rejected
     return {
         "queue": len(list((LABEL_ROOT / "queue").glob("*.json"))),
         "labeled": len(list((LABEL_ROOT / "labeled").glob("*.json"))),
@@ -130,7 +140,53 @@ def stats_data() -> dict[str, Any]:
         "raw_total": total,
         "raw_accepted": accepted,
         "raw_rejected": rejected,
+        "raw_errors": errors,
+        "raw_success_rate": pct(accepted, total),
     }
+
+
+def verdict_stats(where: str = "1=1", params: tuple[Any, ...] = ()) -> dict[str, Any]:
+    con = sqlite3.connect(CLAIMCOIN_ROOT / "state" / "claimcoin.sqlite3")
+    rows = dict(con.execute(f"select verdict,count(*) from antibot_attempts where {where} group by verdict", params).fetchall())
+    total = sum(rows.values())
+    accepted = int(rows.get("accepted_success", 0))
+    rejected = int(rows.get("server_reject_antibot", 0))
+    errors = total - accepted - rejected
+    return {"total": total, "accepted": accepted, "rejected": rejected, "errors": errors, "success_rate": pct(accepted, total)}
+
+
+def solver_stats_data() -> dict[str, Any]:
+    con = sqlite3.connect(CLAIMCOIN_ROOT / "state" / "claimcoin.sqlite3")
+    max_id = con.execute("select coalesce(max(id),0) from antibot_attempts").fetchone()[0]
+    return {
+        "overall": verdict_stats(),
+        "last_100": verdict_stats("id > ?", (max(0, max_id - 100),)),
+        "post_tuning_547": verdict_stats("id >= ?", (547,)),
+        "max_id": max_id,
+    }
+
+
+def label_eval_data() -> dict[str, Any]:
+    total = exact = corrected = incomplete = 0
+    for path in labeled_files():
+        data = json.loads(path.read_text())
+        total += 1
+        solver_order = [str(x) for x in (data.get("current_solver", {}).get("submitted_answer_order") or [])]
+        label_order = [str(x) for x in ((data.get("manual_label") or {}).get("correct_answer_order") or [])]
+        if not label_order:
+            incomplete += 1
+        elif solver_order == label_order:
+            exact += 1
+        else:
+            corrected += 1
+    checked = total - incomplete
+    return {"total": total, "checked": checked, "solver_exact": exact, "corrected": corrected, "incomplete": incomplete, "label_success_rate": pct(exact, checked)}
+
+
+def job_status_data() -> dict[str, Any]:
+    if JOB_STATUS_PATH.exists():
+        return json.loads(JOB_STATUS_PATH.read_text())
+    return {"status": "idle", "kind": None, "progress": 0, "message": "Belum ada job retuning/testing aktif.", "updated_at": None}
 
 
 def image_url(image_path: str, q: str) -> str:
@@ -172,9 +228,9 @@ def home(request: Request) -> str:
         <div class='small'>solver question: {escape(data['current_solver'].get('question_text',''))}</div>
         <p><a class='btn btn2' href='/case/{data['case_id']}?{q}'>Label case</a></p></div>""")
     body = f"""
-    <div class='top'><div><h1>ClaimCoin AntiBot Label Studio</h1><div class='tag'>private tunnel UI • raw captures preserved</div></div><div><a class='btn btn2' href='/gallery?{q}'>Gallery</a> <a class='btn btn2' href='/labeled?{q}'>Review labels</a></div></div>
+    <div class='top'><div><h1>ClaimCoin AntiBot Label Studio</h1><div class='tag'>private tunnel UI • raw captures preserved</div></div><div><a class='btn btn2' href='/stats?{q}'>Solver stats</a> <a class='btn btn2' href='/gallery?{q}'>Gallery</a> <a class='btn btn2' href='/labeled?{q}'>Review labels</a></div></div>
     <div class='grid'>
-      <div class='stat'><span>Queue</span><br><b>{st['queue']}</b></div><div class='stat'><span>Labeled</span><br><b>{st['labeled']}</b></div><div class='stat'><span>Raw rejected</span><br><b>{st['raw_rejected']}</b></div><div class='stat'><span>Raw total</span><br><b>{st['raw_total']}</b></div>
+      <div class='stat'><span>Queue</span><br><b>{st['queue']}</b></div><div class='stat'><span>Labeled</span><br><b>{st['labeled']}</b></div><div class='stat good'><span>Success rate</span><br><b>{st['raw_success_rate']}%</b></div><div class='stat'><span>Raw total</span><br><b>{st['raw_total']}</b></div>
     </div>
     <div class='card'><h2>Tambah queue</h2><form method='post' action='/export?{q}'><div class='grid'><div><label>Priority</label><select name='priority'><option value='rejected'>Rejected dulu</option><option value='accepted'>Accepted</option><option value='all'>All</option></select></div><div><label>Limit</label><input name='limit' value='50'></div></div><p><button>Export ke queue</button></p></form></div>
     <h2>Queue</h2><div class='case-list'>{''.join(cases) or '<div class=card>Queue kosong.</div>'}</div>
@@ -226,8 +282,10 @@ def case_page(case_id: str, request: Request) -> str:
         value = (ml.get("options_text") or {}).get(oid) or solver_text
         raw = current.get("tesseract_option_ocr", {}).get(oid, [])
         opts_html.append(f"""<div class='option'><div><img src='/images/{rel}?{q}'><div class='pill'>ID {oid}</div></div><div>
-        <label>Final option text, edit this if the image text is different</label><input name='option_{oid}' value='{escape(value)}'>
-        <label><input type='checkbox' name='option_correct_{oid}' value='1' checked style='width:auto'> solver read correct, uncheck if you manually corrected this option</label>
+        <label>Final option text, edit this if the image text is different</label><input class='watched-field option-field' data-original='{escape(solver_text)}' data-check='option_correct_{oid}' name='option_{oid}' value='{escape(value)}'>
+        <div class='changed-note'>Edited manually, checkbox auto-unchecked.</div>
+        <p><button type='button' class='btn btn2 use-solver-text' data-target='option_{oid}' data-value='{escape(solver_text)}'>Use solver text</button></p>
+        <label><input id='option_correct_{oid}' type='checkbox' name='option_correct_{oid}' value='1' checked style='width:auto'> solver read correct, auto-unchecked if you edit this option</label>
         <details class='ocr-box'><summary>OCR candidate list, read-only evidence</summary><pre>{escape(json.dumps(raw, ensure_ascii=False, indent=2))}</pre></details></div></div>""")
     submitted = current.get("submitted_answer_order") or []
     order_value = " ".join(ml.get("correct_answer_order") or submitted)
@@ -236,8 +294,10 @@ def case_page(case_id: str, request: Request) -> str:
     body = f"""
     <div class='top'><div><h1>{data['case_id']}</h1><div class='tag'>attempt {data['attempt_id']} • {data['verdict']} • confidence {current.get('confidence')}</div></div><a class='btn btn2' href='/?{q}'>Back</a></div>
     <form method='post' action='/case/{case_id}/save?{q}'>
-    <div class='card'><h2>Question</h2><div class='help'><b>Yang diedit: Final question text.</b> List OCR di bawah itu cuma kandidat bacaan mentah. Kalau gambar memang bertulis <span class='mono'>rat, bat, owl</span>, isi field ini dengan <span class='mono'>rat, bat, owl</span>. Jangan edit list mentahnya.</div><img src='/images/{question_rel}?{q}'><label>Final question text</label><input name='question_text' value='{escape(question_value)}'>
-    <label><input type='checkbox' name='question_correct' value='1' checked style='width:auto'> solver question read correct, uncheck if you manually corrected the final question text</label>
+    <div class='card'><h2>Question</h2><div class='help'><b>Yang diedit: Final question text.</b> List OCR di bawah itu cuma kandidat bacaan mentah. Kalau gambar memang bertulis <span class='mono'>rat, bat, owl</span>, isi field ini dengan <span class='mono'>rat, bat, owl</span>. Jangan edit list mentahnya.</div><img src='/images/{question_rel}?{q}'><label>Final question text</label><input class='watched-field' data-original='{escape(current.get('question_text') or '')}' data-check='question_correct' name='question_text' value='{escape(question_value)}'>
+    <div class='changed-note'>Edited manually, checkbox auto-unchecked.</div>
+    <p><button type='button' class='btn btn2 use-solver-text' data-target='question_text' data-value='{escape(current.get('question_text') or '')}'>Use solver question</button></p>
+    <label><input id='question_correct' type='checkbox' name='question_correct' value='1' checked style='width:auto'> solver question read correct, auto-unchecked if you edit the final question text</label>
     <details class='ocr-box'><summary>OCR candidate list, read-only evidence</summary><pre>{escape(json.dumps(current.get('tesseract_question_ocr', []), ensure_ascii=False, indent=2))}</pre></details></div>
     <div class='card'><h2>Options</h2>{''.join(opts_html)}</div>
     <div class='card'><h2>Final answer order</h2><div class='help'><b>Klik ID option sesuai urutan jawaban yang benar.</b> Contoh kalau benar <span class='mono'>2650 8668 4887</span>, klik ID 2650, lalu 8668, lalu 4887. Bisa reset kapan aja.</div>
@@ -250,6 +310,7 @@ def case_page(case_id: str, request: Request) -> str:
     <p><button>Save as labeled</button> <a class='btn btn2' href='/?{q}'>Skip, keep in queue</a></p></div></form>
 <script>
 const optionIds = {json.dumps(option_ids)};
+const solverTexts = {json.dumps(current.get('options_text', {}))};
 const solverOrder = {json.dumps(submitted)};
 const initialOrder = {json.dumps(order_value.split())};
 const hidden = document.getElementById('correct_order');
@@ -275,6 +336,26 @@ document.getElementById('reset-order').addEventListener('click', () => {{ order 
 document.getElementById('use-solver-order').addEventListener('click', () => {{ order = solverOrder.filter(id => optionIds.includes(id)); renderOrder(); }});
 order = initialOrder.filter(id => optionIds.includes(id));
 renderOrder();
+function normalizeText(v) {{ return (v || '').trim(); }}
+document.querySelectorAll('.watched-field').forEach((field) => {{
+  const original = normalizeText(field.dataset.original);
+  const checkbox = document.getElementById(field.dataset.check);
+  const update = () => {{
+    const same = normalizeText(field.value) === original;
+    if (checkbox) checkbox.checked = same;
+    field.closest('div').classList.toggle('field-changed', !same);
+  }};
+  field.addEventListener('input', update);
+  update();
+}});
+document.querySelectorAll('.use-solver-text').forEach((btn) => {{
+  btn.addEventListener('click', () => {{
+    const target = document.querySelector(`[name="${{btn.dataset.target}}"]`);
+    if (!target) return;
+    target.value = btn.dataset.value || '';
+    target.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  }});
+}});
 </script>
     """
     return html_page(case_id, body)
@@ -314,6 +395,40 @@ async def save_case(case_id: str, request: Request) -> RedirectResponse:
     labeled.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     path.unlink()
     return RedirectResponse(f"/labeled/{case_id}?{token_q(request)}", status_code=303)
+
+
+@app.get("/stats", response_class=HTMLResponse)
+def stats_page(request: Request) -> str:
+    require_auth(request)
+    q = token_q(request)
+    live = solver_stats_data()
+    labels = label_eval_data()
+    job = job_status_data()
+    progress = max(0, min(100, int(job.get("progress") or 0)))
+
+    def stat_card(name: str, val: Any, cls: str = "") -> str:
+        return f"<div class='stat {cls}'><span>{escape(name)}</span><br><b>{escape(str(val))}</b></div>"
+
+    def group(title: str, d: dict[str, Any]) -> str:
+        return f"""<div class='card'><h2>{escape(title)}</h2><div class='grid'>
+        {stat_card('Total', d['total'])}{stat_card('Berhasil', d['accepted'], 'good')}{stat_card('Gagal', d['rejected'], 'bad')}{stat_card('Error', d['errors'], 'warn')}{stat_card('Success rate', str(d['success_rate']) + '%', 'good')}
+        </div></div>"""
+
+    body = f"""
+    <div class='top'><div><h1>Solver performance center</h1><div class='tag'>live ClaimCoin attempts + labeled dataset evaluation</div></div><a class='btn btn2' href='/?{q}'>Back</a></div>
+    {group('Overall raw live attempts', live['overall'])}
+    {group('Recent live attempts, last 100', live['last_100'])}
+    {group('Post tuning window, attempt >= 547', live['post_tuning_547'])}
+    <div class='card'><h2>Label-based solver check</h2><div class='help'>Ini ngecek label yang sudah Boskuu save. Kalau solver order sama dengan correct order label, dihitung exact. Kalau belum ada label cukup banyak, angka ini belum final.</div><div class='grid'>
+      {stat_card('Labeled total', labels['total'])}{stat_card('Checked', labels['checked'])}{stat_card('Solver exact', labels['solver_exact'], 'good')}{stat_card('Corrected by human', labels['corrected'], 'bad')}{stat_card('Label exact rate', str(labels['label_success_rate']) + '%', 'good')}
+    </div></div>
+    <div class='card'><h2>Retuning / testing job</h2><div class='help'>Fondasi job progress sudah ada. Tombol start retuning/testing akan disambung ke runner background berikutnya, jadi kalau web ditutup status tetap bisa dibaca lagi dari sini.</div>
+      <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Kind', job.get('kind') or '-')}{stat_card('Progress', str(progress) + '%')}{stat_card('Message', job.get('message') or '-')}</div>
+      <div class='progress'><span style='width:{progress}%'></span></div>
+      <p><button class='btn btn2' disabled>Start label test, incoming</button> <button class='btn btn2' disabled>Start retune, incoming</button></p>
+    </div>
+    """
+    return html_page("Solver stats", body)
 
 
 @app.get("/gallery", response_class=HTMLResponse)
@@ -376,7 +491,7 @@ def main() -> None:
     ensure_dirs()
     token = get_token()
     print(f"Label Studio token: {token}")
-    print(f"Local URL: http://{args.host}:{args.port}/?token={token}")
+    print(f"Local URL: http://{args.host}:{args.port}/?token=***")
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

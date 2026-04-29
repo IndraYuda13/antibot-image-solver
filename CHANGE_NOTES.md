@@ -193,3 +193,22 @@
   - Test suite: `31 passed`.
 - Do not casually remove:
   - OCR candidate arrays are intentionally shown as read-only evidence. The final text inputs are the ground-truth label fields.
+
+## 2026-04-29 - Label studio auto-review and solver stats
+
+- Trigger evidence:
+  - Boskuu wanted the `solver read correct` checkbox to update automatically when final text is edited, wanted one-click solver values for question/options, and wanted a dedicated solver performance menu with raw totals, success rates, post-tuning stats, label-test stats, and a future retuning/testing progress area.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+- What changed:
+  - Final question/option fields now auto-uncheck their `solver read correct` checkbox when edited away from the solver value, and re-check when restored.
+  - Added `Use solver question` and `Use solver text` buttons so Boskuu can reset fields to the solver's current/stored read quickly.
+  - Added `Solver stats` page with overall raw live attempts, last-100 attempts, post-tuning window from attempt `>=547`, label-based exact-order evaluation, and a persistent progress panel foundation for future retuning/testing jobs.
+  - Home page now shows success rate directly instead of only raw rejected count.
+- Verification:
+  - Public case page renders auto-uncheck guidance plus `Use solver` controls.
+  - Public stats page renders live counts and success rates.
+  - Test suite: `31 passed`.
+- Do not casually remove:
+  - The stats page separates raw live server verdicts from label-based offline evaluation because they answer different questions.
+  - The retuning/testing progress panel is currently a foundation, not a runner. It reads `state/antibot-labeling/jobs/solver_eval_status.json` when future jobs write it.
