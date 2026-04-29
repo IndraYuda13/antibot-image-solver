@@ -7,6 +7,7 @@ import json
 import shutil
 import sqlite3
 import sys
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -260,6 +261,90 @@ def label_next(args: argparse.Namespace) -> None:
     print(f"Saved labeled case: {labeled_path}")
 
 
+
+def make_contact_sheet(case_path: Path, label_root: Path) -> Path:
+    from PIL import Image, ImageDraw
+
+    data = json.loads(case_path.read_text())
+    cid = data["case_id"]
+    preview_dir = label_root / "preview"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    question_path = label_root / data["images"]["question"]
+    question = Image.open(question_path).convert("RGB")
+    options = []
+    for opt in data["images"]["options"]:
+        img = Image.open(label_root / opt["image"]).convert("RGB")
+        options.append((str(opt["id"]), img, data["current_solver"].get("options_text", {}).get(str(opt["id"]), "")))
+
+    width = max(900, question.width + 40)
+    option_h = max([img.height for _, img, _ in options] or [80])
+    height = 170 + question.height + len(options) * (option_h + 55)
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+    y = 12
+    draw.text((16, y), f"{cid} | attempt {data['attempt_id']} | {data['verdict']} | options={data['option_count']}", fill=(0, 0, 0))
+    y += 24
+    draw.text((16, y), f"Question solver: {data['current_solver'].get('question_text', '')}", fill=(0, 0, 0))
+    y += 24
+    draw.text((16, y), f"Submitted order: {' '.join(data['current_solver'].get('submitted_answer_order', []))}", fill=(0, 0, 0))
+    y += 34
+    draw.text((16, y), "QUESTION", fill=(0, 0, 180))
+    y += 20
+    canvas.paste(question, (16, y))
+    y += question.height + 28
+    for oid, img, solver_text in options:
+        draw.text((16, y), f"OPTION {oid} | solver: {solver_text}", fill=(0, 0, 180))
+        y += 20
+        canvas.paste(img, (16, y))
+        y += option_h + 35
+    out = preview_dir / f"{cid}.png"
+    canvas.save(out)
+    return out
+
+
+def show_next(args: argparse.Namespace) -> None:
+    label_root = Path(args.label_root)
+    queue_files = sorted((label_root / "queue").glob("*.json"))
+    if not queue_files:
+        print("Queue kosong. Jalankan export dulu.")
+        return
+    out = make_contact_sheet(queue_files[0], label_root)
+    print(out)
+
+
+def build_web_index(label_root: Path, limit: int = 100) -> Path:
+    web_dir = label_root / "web"
+    web_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for case_path in sorted((label_root / "queue").glob("*.json"))[:limit]:
+        data = json.loads(case_path.read_text())
+        preview = make_contact_sheet(case_path, label_root)
+        rel_preview = "../" + str(preview.relative_to(label_root)).replace("\\", "/")
+        rows.append(
+            f"<section style='border:1px solid #ccc;margin:16px;padding:12px'>"
+            f"<h2>{escape(data['case_id'])} | {escape(data['verdict'])}</h2>"
+            f"<img src='{escape(rel_preview)}' style='max-width:100%;height:auto'>"
+            f"<pre>{escape(json.dumps(data.get('current_solver', {}), ensure_ascii=False, indent=2))}</pre>"
+            f"</section>"
+        )
+    html = """<!doctype html><meta charset='utf-8'><title>ClaimCoin AntiBot Label Queue</title>
+<body style='font-family:Arial,sans-serif;max-width:1100px;margin:auto'>
+<h1>ClaimCoin AntiBot Label Queue</h1>
+<p>Ini preview read-only. Label tetap lewat terminal command <code>label-next</code>.</p>
+%s
+</body>""" % "\n".join(rows)
+    out = web_dir / "index.html"
+    out.write_text(html)
+    return out
+
+
+def web_preview(args: argparse.Namespace) -> None:
+    label_root = Path(args.label_root)
+    out = build_web_index(label_root, args.limit)
+    print(out)
+    print("Serve contoh:")
+    print(f"cd {label_root} && python3 -m http.server 8765")
+
 def stats(args: argparse.Namespace) -> None:
     label_root = Path(args.label_root)
     for name in ["queue", "labeled", "skipped"]:
@@ -283,12 +368,19 @@ def main() -> int:
     ex.add_argument("--priority", choices=["rejected", "accepted", "all"], default="rejected")
     ex.add_argument("--limit", type=int, default=50)
     sub.add_parser("label-next")
+    sub.add_parser("show-next")
+    web = sub.add_parser("web-preview")
+    web.add_argument("--limit", type=int, default=100)
     sub.add_parser("stats")
     args = ap.parse_args()
     if args.command == "export":
         export_cases(args)
     elif args.command == "label-next":
         label_next(args)
+    elif args.command == "show-next":
+        show_next(args)
+    elif args.command == "web-preview":
+        web_preview(args)
     elif args.command == "stats":
         stats(args)
     return 0

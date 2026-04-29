@@ -138,3 +138,19 @@
   - `stats` reported queue=2, labeled=0, skipped=0.
 - Do not casually remove:
   - The raw-capture preservation rule. Queue files can move, but source captures are evidence and must remain auditable.
+
+## 2026-04-29 - ClaimCoin labeling visual preview
+
+- Trigger evidence:
+  - Boskuu asked for an easier labeling flow where images can be viewed while labeling, because plain SSH terminals do not display PNGs inline reliably.
+- Files touched:
+  - `tools/label_claimcoin_antibot.py`
+- What changed:
+  - Added `show-next` to generate a single contact sheet PNG for the next queue case under `state/antibot-labeling/preview/`.
+  - Added `web-preview --limit N` to generate a read-only HTML gallery at `state/antibot-labeling/web/index.html`, using generated contact sheets for queued cases.
+- Verification:
+  - Script byte-compiled successfully.
+  - `show-next` generated `state/antibot-labeling/preview/claimcoin_000541.png`.
+  - `web-preview --limit 5` generated preview contact sheets and `state/antibot-labeling/web/index.html`.
+- Do not casually remove:
+  - The terminal labeling flow. Web preview is read-only by design for now; labels still move through `label-next` to avoid accidental browser-side writes.
