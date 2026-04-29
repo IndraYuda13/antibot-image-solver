@@ -154,3 +154,22 @@
   - `web-preview --limit 5` generated preview contact sheets and `state/antibot-labeling/web/index.html`.
 - Do not casually remove:
   - The terminal labeling flow. Web preview is read-only by design for now; labels still move through `label-next` to avoid accidental browser-side writes.
+
+## 2026-04-29 - ClaimCoin private web label studio
+
+- Trigger evidence:
+  - Boskuu wanted a proper interactive web labeling UI with stats, queue export, inline images, and labeling actions, preferably reachable through Cloudflared tunnel.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+  - `pyproject.toml`
+- What changed:
+  - Added a FastAPI private label studio with token auth, queue stats, export form, case list, gallery, image serving, and case labeling form.
+  - Label form shows question/option images inline, prefilled solver reads, checkboxes for solver-correct review, editable manual labels, and final order input.
+  - Added `python-multipart` dependency for FastAPI form handling.
+- Verification:
+  - Local app started on `127.0.0.1:8765` in screen `claimlabel-web`.
+  - Local health `GET /health` returned `{"ok": true}`.
+  - Local HTML page rendered `ClaimCoin AntiBot Label Studio` with token auth.
+  - Cloudflared quick tunnel was attempted in screen `claimlabel-tunnel`, but the generated trycloudflare URLs returned Cloudflare-side `404` and did not route to the local app, despite cloudflared reporting registered tunnel connections. Treat this as a tunnel routing blocker, not an app failure.
+- Do not casually remove:
+  - Token auth. Even quick tunnel URLs must not expose labeling writes without a secret token.
