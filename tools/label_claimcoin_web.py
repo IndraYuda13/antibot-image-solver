@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from html import escape
 import secrets
 import shutil
 import sqlite3
