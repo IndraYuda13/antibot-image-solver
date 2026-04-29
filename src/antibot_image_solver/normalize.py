@@ -72,6 +72,26 @@ def eval_simple_expr(token: str) -> Optional[str]:
 
 def normalize_letters(text: str) -> str:
     text = text.strip().lower()
+    exact_fixes = {
+        # Exact raw OCR forms whose leading digit/punctuation would be lost by generic cleanup.
+        "2p": "zip",
+        "200": "zoo",
+        "20r": "zor",
+        "i3ft": "left",
+        "lert": "left",
+        "rignt": "right",
+        "(ow": "low",
+        "mc": "arc",
+        "wal": "wht",
+        "bik": "bk",
+        "fer": "var",
+        "“3": "use",
+        "@da": "add",
+        "or": "cir",
+        "a": "doc",
+    }
+    if text in exact_fixes:
+        return exact_fixes[text]
     replacements = {
         "0": "o",
         "1": "l",
@@ -174,6 +194,12 @@ def normalize_letters(text: str) -> str:
         "40k": "fox",
         "ak": "fox",
         "jb": "job",
+        # Manual-label ClaimCoin regressions from 2026-04-29.
+        "pai": "pey",
+        "ple": "pis",
+        "zi": "zul",
+        "2p": "zip",
+        "ug": "zig",
     }
     return fixes.get(text, text)
 

@@ -64,7 +64,7 @@ def fuzzy_text_score(token: str, candidates: Iterable[str]) -> float:
 
 
 def _is_numeric_alias(form: str) -> bool:
-    return form.isdigit() or form in NUMBER_WORDS.values()
+    return any(ch.isdigit() for ch in form) or form in NUMBER_WORDS.values()
 
 
 def _allow_numeric_alias_match(token: str, option_candidates: Iterable[str]) -> bool:

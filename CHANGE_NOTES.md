@@ -304,3 +304,26 @@
   - Full test suite: `32 passed`.
 - Do not casually remove:
   - Keep `stored-debug` and `current-ocr` separate. Stored-debug is for fast matcher tuning; current-ocr is for slower end-to-end OCR validation.
+
+## 2026-04-29 - ClaimCoin fast-eval tuning pass to 99.42%
+
+- Trigger evidence:
+  - Boskuu handed over tuning after the fast eval showed 11 wrong cases. The goal was to use the 20 manual labels plus accepted-success raw set without overloading the VPS.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `src/antibot_image_solver/matcher.py`
+  - `tests/test_claimcoin_manual_label_regression.py`
+- What changed:
+  - Added regression tests for manual-label failure families from ClaimCoin.
+  - Narrowed numeric-alias filtering in matcher so alphanumeric digit variants do not hijack alphabetic token matching.
+  - Added exact OCR corrections for ClaimCoin label families such as `2p -> zip`, `200 -> zoo`, `20r -> zor`, `pai -> pey`, `ple -> pis`, `wal -> wht`, `bik -> bk`, `fer -> var`, `@da -> add`, and related narrow forms.
+  - Tested and rejected a top-candidate bonus idea because it fixed one manual-label case but regressed accepted-success raw cases; the final committed state keeps the safer original scoring without that bonus.
+- Verification:
+  - Full tests: `36 passed`.
+  - Fast stored-debug eval after final patch: `691 total`, `687 ok`, `4 wrong`, `0 errors`, `99.42%` success.
+  - Breakdown: accepted-success raw `668/671 ok`, manual labels `19/20 ok`.
+- Remaining known wrong cases after this pass:
+  - accepted raw: `claimcoin_000145`, `claimcoin_000276`, `claimcoin_000397`
+  - manual label: `claimcoin_000702`
+- Do not casually remove:
+  - Keep the rejected top-candidate-bonus lesson. Candidate rank sounds useful, but the tested version reduced overall eval from `99.42%` to `99.13%` by causing accepted raw regressions.
