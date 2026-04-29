@@ -590,12 +590,96 @@ def labeled_detail(case_id: str, request: Request) -> str:
     qrel = image_url(data["images"]["question"], q)
     order = " ".join(label.get("correct_answer_order") or [])
     body = f"""
-    <div class='top'><div><h1>{data['case_id']} review</h1><div class='tag'>saved label result</div></div><div><a class='btn btn2' href='/labeled?{q}'>All labels</a> <a class='btn btn2' href='/?{q}'>Home</a></div></div>
+    <div class='top'><div><h1>{data['case_id']} review</h1><div class='tag'>saved label result</div></div><div><a class='btn' href='/labeled/{case_id}/edit?{q}'>Edit label</a> <a class='btn btn2' href='/labeled?{q}'>All labels</a> <a class='btn btn2' href='/?{q}'>Home</a></div></div>
     <div class='card'><h2>Question</h2><img src='{qrel}'><label>Final question text</label><input readonly value='{escape(label.get('question_text',''))}'><div class='small'>tokens: {escape(', '.join(label.get('question_tokens') or []))}</div><div class='small'>solver question correct: {escape(str(review.get('question_read_correct')))}</div></div>
     <div class='card'><h2>Options</h2>{''.join(opts)}</div>
     <div class='card'><h2>Final order</h2><div class='stat'><b>{escape(order)}</b></div><div class='small'>auto-derived: {escape(' '.join(label.get('auto_derived_order') or []))}</div><div class='small'>submitted order was correct: {escape(str(review.get('submitted_order_correct')))}</div><label>Notes</label><textarea readonly rows='3'>{escape(label.get('notes',''))}</textarea></div>
     """
     return html_page(f"{case_id} review", body)
+
+
+@app.get("/labeled/{case_id}/edit", response_class=HTMLResponse)
+def labeled_edit(case_id: str, request: Request) -> str:
+    require_auth(request)
+    q = token_q(request)
+    _, data = load_labeled(case_id)
+    label = data.get("manual_label") or {}
+    current = data.get("current_solver") or {}
+    option_ids = [str(opt["id"]) for opt in data["images"]["options"]]
+    question_rel = image_url(data["images"]["question"], q)
+    question_value = label.get("question_text") or current.get("question_text") or ""
+    opts = []
+    for opt in data["images"]["options"]:
+        oid = str(opt["id"])
+        final_text = (label.get("options_text") or {}).get(oid) or (current.get("options_text") or {}).get(oid, "")
+        opts.append(f"""<div class='option'><div><img src='{image_url(opt['image'], q)}'><div class='pill'>ID {oid}</div></div>
+        <div><label>Final option text</label><input name='option_{oid}' value='{escape(final_text)}'></div></div>""")
+    order_value = " ".join(label.get("correct_answer_order") or [])
+    option_buttons = "".join([f"<button type='button' class='order-chip' data-id='{escape(oid)}'>ID {escape(oid)}</button>" for oid in option_ids])
+    body = f"""
+    <div class='top'><div><h1>Edit {data['case_id']}</h1><div class='tag'>edit saved label, raw capture stays preserved</div></div><a class='btn btn2' href='/labeled/{case_id}?{q}'>Cancel</a></div>
+    <form method='post' action='/labeled/{case_id}/edit?{q}'>
+      <div class='card'><h2>Question</h2><img src='{question_rel}'><label>Final question text</label><input name='question_text' value='{escape(question_value)}'></div>
+      <div class='card'><h2>Options</h2>{''.join(opts)}</div>
+      <div class='card'><h2>Final answer order</h2><div class='order-board'><div><label>Available option IDs</label><div id='available-options' class='chipbox'>{option_buttons}</div></div><div><label>Your selected order</label><div id='selected-order' class='chipbox'></div></div></div>
+      <input type='hidden' id='correct_order' name='correct_order' value='{escape(order_value)}'>
+      <p><button type='button' class='btn btn2' id='reset-order'>Reset order</button></p>
+      <label>Notes</label><textarea name='notes' rows='3'>{escape(label.get('notes',''))}</textarea>
+      <p><button>Save edited label</button></p></div>
+    </form>
+<script>
+const optionIds = {json.dumps(option_ids)};
+const initialOrder = {json.dumps(order_value.split())};
+const hidden = document.getElementById('correct_order');
+const selected = document.getElementById('selected-order');
+const chips = Array.from(document.querySelectorAll('.order-chip'));
+let order = [];
+function renderOrder() {{
+  selected.innerHTML = '';
+  order.forEach((id, idx) => {{
+    const slot = document.createElement('span');
+    slot.className = 'answer-slot';
+    slot.innerHTML = `<b>${{idx + 1}}.</b> ID ${{id}} <button type="button" data-remove="${{id}}">×</button>`;
+    selected.appendChild(slot);
+  }});
+  hidden.value = order.join(' ');
+  chips.forEach(chip => chip.classList.toggle('used', order.includes(chip.dataset.id)));
+}}
+function addId(id) {{ if (!order.includes(id)) {{ order.push(id); renderOrder(); }} }}
+function removeId(id) {{ order = order.filter(x => x !== id); renderOrder(); }}
+chips.forEach(chip => chip.addEventListener('click', () => addId(chip.dataset.id)));
+selected.addEventListener('click', (ev) => {{ const id = ev.target.dataset.remove; if (id) removeId(id); }});
+document.getElementById('reset-order').addEventListener('click', () => {{ order = []; renderOrder(); }});
+order = initialOrder.filter(id => optionIds.includes(id));
+renderOrder();
+</script>
+    """
+    return html_page(f"Edit {case_id}", body)
+
+
+@app.post("/labeled/{case_id}/edit")
+async def labeled_edit_save(case_id: str, request: Request) -> RedirectResponse:
+    require_auth(request)
+    path, data = load_labeled(case_id)
+    form = await request.form()
+    question_text = str(form.get("question_text") or "").strip()
+    options_text = {}
+    for opt in data["images"]["options"]:
+        oid = str(opt["id"])
+        options_text[oid] = str(form.get(f"option_{oid}") or "").strip()
+    order = [x.strip() for x in str(form.get("correct_order") or "").replace(",", " ").split() if x.strip()]
+    data["manual_label"] = {
+        **(data.get("manual_label") or {}),
+        "question_text": question_text,
+        "question_tokens": split_tokens(question_text, int(data["option_count"])),
+        "options_text": options_text,
+        "correct_answer_order": order,
+        "auto_derived_order": auto_order(question_text, options_text, int(data["option_count"])),
+        "notes": str(form.get("notes") or "").strip(),
+    }
+    data["status"] = "labeled"
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    return RedirectResponse(f"/labeled/{case_id}?{token_q(request)}", status_code=303)
 
 
 def main() -> None:

@@ -230,3 +230,21 @@
   - Test suite: `31 passed`.
 - Do not casually remove:
   - Keep old `current_solver` values as historical queue evidence. The latest solver panel is intentionally separate so old-vs-new behavior can be compared.
+
+## 2026-04-29 - Edit saved labels from web UI
+
+- Trigger evidence:
+  - Boskuu found a wrong saved label on `claimcoin_000510`: question was `football, cricket, qolf`, should be `football, cricket, golf`.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+  - `state/antibot-labeling/labeled/claimcoin_000510.json` (local labeling data)
+- What changed:
+  - Added `Edit label` button to labeled review pages.
+  - Added `GET/POST /labeled/{case_id}/edit` so saved labels can be corrected in-browser without moving the raw capture or losing label history context.
+  - Corrected `claimcoin_000510` manual question label to `football, cricket, golf`; derived tokens/order now align with the saved options.
+- Verification:
+  - Local and public review page for `claimcoin_000510` shows `football, cricket, golf` and an `Edit label` button.
+  - Local edit page opens with editable fields and `Save edited label`.
+  - Test suite: `31 passed`.
+- Do not casually remove:
+  - Editing labeled cases must keep raw capture JSON untouched. Only the labeled JSON under `state/antibot-labeling/labeled/` should change.
