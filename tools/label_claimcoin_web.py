@@ -93,6 +93,7 @@ pre{{white-space:pre-wrap;color:#cfe6d2;background:#09100c;border:1px solid var(
 .order-chip.used{{opacity:.35;filter:grayscale(1)}} .answer-slot{{display:flex;gap:8px;align-items:center;background:#1f2b23;border:1px solid #3e5144;border-radius:999px;padding:7px 10px}}
 .changed-note{{display:none;color:var(--warn);font-size:12px;margin-top:5px}} .field-changed .changed-note{{display:block}}
 .progress{{height:16px;background:#09100c;border:1px solid var(--line);border-radius:999px;overflow:hidden}} .progress span{{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--good));width:0}}
+.toast{{position:fixed;right:18px;bottom:18px;background:#d7ff92;color:#071008;border-radius:14px;padding:12px 14px;font-weight:900;box-shadow:0 18px 60px #000b;opacity:0;transform:translateY(10px);transition:.18s;z-index:9999}} .toast.show{{opacity:1;transform:translateY(0)}}
 .answer-slot button{{padding:2px 7px;border-radius:999px;background:#ff6b6b;color:#230000}} .mono{{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
 @media(max-width:720px){{.option,.order-board{{grid-template-columns:1fr}}.wrap{{padding:14px}}}}
 </style></head><body><div class="wrap">{body}</div></body></html>"""
@@ -284,7 +285,7 @@ def case_page(case_id: str, request: Request) -> str:
         opts_html.append(f"""<div class='option'><div><img src='/images/{rel}?{q}'><div class='pill'>ID {oid}</div></div><div>
         <label>Final option text, edit this if the image text is different</label><input class='watched-field option-field' data-original='{escape(solver_text)}' data-check='option_correct_{oid}' name='option_{oid}' value='{escape(value)}'>
         <div class='changed-note'>Edited manually, checkbox auto-unchecked.</div>
-        <p><button type='button' class='btn btn2 use-solver-text' data-target='option_{oid}' data-value='{escape(solver_text)}'>Use solver text</button></p>
+        <p><button type='button' class='btn btn2 use-solver-text' data-target='option_{oid}' data-value='{escape(solver_text)}'>Pakai hasil solver text</button></p>
         <label><input id='option_correct_{oid}' type='checkbox' name='option_correct_{oid}' value='1' checked style='width:auto'> solver read correct, auto-unchecked if you edit this option</label>
         <details class='ocr-box'><summary>OCR candidate list, read-only evidence</summary><pre>{escape(json.dumps(raw, ensure_ascii=False, indent=2))}</pre></details></div></div>""")
     submitted = current.get("submitted_answer_order") or []
@@ -296,7 +297,7 @@ def case_page(case_id: str, request: Request) -> str:
     <form method='post' action='/case/{case_id}/save?{q}'>
     <div class='card'><h2>Question</h2><div class='help'><b>Yang diedit: Final question text.</b> List OCR di bawah itu cuma kandidat bacaan mentah. Kalau gambar memang bertulis <span class='mono'>rat, bat, owl</span>, isi field ini dengan <span class='mono'>rat, bat, owl</span>. Jangan edit list mentahnya.</div><img src='/images/{question_rel}?{q}'><label>Final question text</label><input class='watched-field' data-original='{escape(current.get('question_text') or '')}' data-check='question_correct' name='question_text' value='{escape(question_value)}'>
     <div class='changed-note'>Edited manually, checkbox auto-unchecked.</div>
-    <p><button type='button' class='btn btn2 use-solver-text' data-target='question_text' data-value='{escape(current.get('question_text') or '')}'>Use solver question</button></p>
+    <p><button type='button' class='btn btn2 use-solver-text' data-target='question_text' data-value='{escape(current.get('question_text') or '')}'>Pakai hasil solver question</button></p>
     <label><input id='question_correct' type='checkbox' name='question_correct' value='1' checked style='width:auto'> solver question read correct, auto-unchecked if you edit the final question text</label>
     <details class='ocr-box'><summary>OCR candidate list, read-only evidence</summary><pre>{escape(json.dumps(current.get('tesseract_question_ocr', []), ensure_ascii=False, indent=2))}</pre></details></div>
     <div class='card'><h2>Options</h2>{''.join(opts_html)}</div>
@@ -304,10 +305,11 @@ def case_page(case_id: str, request: Request) -> str:
     <div class='small'>Solver submitted: {' '.join(submitted)}</div>
     <div class='order-board'><div><label>Available option IDs</label><div id='available-options' class='chipbox'>{option_buttons}</div></div><div><label>Your selected order</label><div id='selected-order' class='chipbox'></div></div></div>
     <input type='hidden' id='correct_order' name='correct_order' value='{escape(order_value)}'>
-    <p><button type='button' class='btn btn2' id='use-solver-order'>Use solver order</button> <button type='button' class='btn btn2' id='reset-order'>Reset order</button></p>
+    <p><button type='button' class='btn btn2' id='use-solver-order'>Pakai order solver</button> <button type='button' class='btn btn2' id='reset-order'>Reset order</button></p>
     <label><input type='checkbox' name='submitted_order_correct' value='1' style='width:auto'> submitted order already correct</label>
     <label>Notes</label><textarea name='notes' rows='3'>{escape(ml.get('notes',''))}</textarea>
     <p><button>Save as labeled</button> <a class='btn btn2' href='/?{q}'>Skip, keep in queue</a></p></div></form>
+<div id='toast' class='toast'></div>
 <script>
 const optionIds = {json.dumps(option_ids)};
 const solverTexts = {json.dumps(current.get('options_text', {}))};
@@ -337,23 +339,35 @@ document.getElementById('use-solver-order').addEventListener('click', () => {{ o
 order = initialOrder.filter(id => optionIds.includes(id));
 renderOrder();
 function normalizeText(v) {{ return (v || '').trim(); }}
-document.querySelectorAll('.watched-field').forEach((field) => {{
+function showToast(msg) {{
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1600);
+}}
+function updateFieldState(field) {{
   const original = normalizeText(field.dataset.original);
   const checkbox = document.getElementById(field.dataset.check);
-  const update = () => {{
-    const same = normalizeText(field.value) === original;
-    if (checkbox) checkbox.checked = same;
-    field.closest('div').classList.toggle('field-changed', !same);
-  }};
-  field.addEventListener('input', update);
-  update();
+  const same = normalizeText(field.value) === original;
+  if (checkbox) checkbox.checked = same;
+  const box = field.closest('.card') || field.parentElement;
+  if (box) box.classList.toggle('field-changed', !same);
+}}
+document.querySelectorAll('.watched-field').forEach((field) => {{
+  field.addEventListener('input', () => updateFieldState(field));
+  updateFieldState(field);
 }});
 document.querySelectorAll('.use-solver-text').forEach((btn) => {{
   btn.addEventListener('click', () => {{
     const target = document.querySelector(`[name="${{btn.dataset.target}}"]`);
-    if (!target) return;
+    if (!target) {{ showToast('Field target tidak ketemu'); return; }}
+    const before = target.value;
     target.value = btn.dataset.value || '';
+    updateFieldState(target);
+    target.focus();
     target.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    showToast(before === target.value ? 'Sudah sama dengan hasil solver' : 'Field diisi dari hasil solver');
   }});
 }});
 </script>
