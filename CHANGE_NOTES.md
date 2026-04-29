@@ -1,5 +1,30 @@
 # Change Notes
 
+## 2026-04-29 - ClaimCoin low-confidence full OCR fallback
+
+- Trigger evidence:
+  - After matcher patch `e3e8a97`, live post-patch attempts reached `22/23` accepted (`95.65%`) with new reject id `500` at confidence `0.3499`.
+  - Target was raised to `98%++`; low-confidence samples are the best next lever because confident cases are already passing and broad mappings risk overfitting.
+- Files touched:
+  - `src/antibot_image_solver/solver.py`
+  - `tests/test_solver_hybrid.py`
+  - `tools/evaluate_claimcoin_history.py`
+  - `docs/superpowers/plans/2026-04-29-claimcoin-low-confidence-fallback.md`
+- What changed:
+  - Added configurable low-confidence fallback knobs:
+    - `ANTIBOT_LOW_CONFIDENCE_THRESHOLD`, default `0.50`
+    - `ANTIBOT_FULL_FALLBACK_MIN_GAIN`, default `0.08`
+  - In fast option-image mode, solver now still runs turbo first, then fast, and runs one full OCR fallback only when the fast result is below threshold.
+  - Full fallback is accepted only when it improves confidence by at least the configured minimum gain; otherwise the fast result is kept with audit metadata showing the fallback was tried and not improved.
+  - Added the historical evaluator script used for `shrtlnksolver` screen progress and offline regression checks.
+- Verification:
+  - `tests/test_solver_hybrid.py`: 6 passed.
+  - Full test suite: 28 passed.
+  - Live reject id `500` replay exercised the fallback path; full OCR did not improve confidence on that sample, so the solver correctly kept the fast result and recorded `fallback_reason=low_confidence_not_improved`.
+- Do not casually remove:
+  - The min-gain gate. Accepting any full OCR result just because it ran can swap one low-confidence guess for another and hurt accepted samples.
+  - The fallback metadata. It is needed to identify whether future live successes/rejects came from turbo, fast, or full fallback.
+
 ## 2026-04-29 - ClaimCoin reject-sample matcher correction stage 2
 
 - Trigger evidence:

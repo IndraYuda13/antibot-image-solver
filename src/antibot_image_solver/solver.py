@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from antibot_image_solver.capture import CaptureRequest, persist_capture
 from antibot_image_solver.matcher import MatchEntry, MatchError, solve_from_hypotheses, solve_from_text_candidates
 from antibot_image_solver.models import AntibotChallenge, SolveDebug, SolveResult
@@ -17,6 +19,23 @@ class SolverInputError(SolverError):
 
 class SolverLowConfidenceError(SolverError):
     pass
+
+
+def _env_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def get_low_confidence_threshold() -> float:
+    return _env_float("ANTIBOT_LOW_CONFIDENCE_THRESHOLD", 0.50, minimum=0.0, maximum=0.99)
+
+
+def get_full_fallback_min_gain() -> float:
+    return _env_float("ANTIBOT_FULL_FALLBACK_MIN_GAIN", 0.08, minimum=0.0, maximum=0.50)
 
 
 def _attach_capture(
@@ -142,6 +161,41 @@ def _accept_turbo_result(result: SolveResult) -> bool:
     return result.success and result.confidence >= 0.56
 
 
+def _maybe_full_fallback(challenge: AntibotChallenge, result: SolveResult, *, debug: bool) -> SolveResult:
+    threshold = get_low_confidence_threshold()
+    if not result.success or result.confidence >= threshold:
+        return result
+
+    fallback = _solve_challenge_once(challenge, debug=debug, ocr_profile="full")
+    min_gain = get_full_fallback_min_gain()
+    if fallback.success and fallback.confidence >= result.confidence + min_gain:
+        fallback.meta.update(
+            {
+                "fallback_profile": "full",
+                "fallback_reason": "low_confidence",
+                "fallback_from_profile": result.meta.get("ocr_profile"),
+                "fallback_from_confidence": result.confidence,
+                "fallback_threshold": threshold,
+                "fallback_min_gain": min_gain,
+            }
+        )
+        return fallback
+
+    result.meta.update(
+        {
+            "fallback_profile": "full",
+            "fallback_reason": "low_confidence_not_improved",
+            "fallback_candidate_confidence": fallback.confidence,
+            "fallback_candidate_success": fallback.success,
+            "fallback_threshold": threshold,
+            "fallback_min_gain": min_gain,
+        }
+    )
+    if fallback.error_code:
+        result.meta["fallback_candidate_error_code"] = fallback.error_code
+    return result
+
+
 def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture: CaptureRequest | None = None) -> SolveResult:
     if not challenge.instruction_image_base64:
         raise SolverInputError("instruction_image_base64 is required")
@@ -153,6 +207,7 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture
         result = _solve_challenge_once(challenge, debug=debug, ocr_profile="turbo")
         if not _accept_turbo_result(result):
             result = _solve_challenge_once(challenge, debug=debug, ocr_profile="fast")
+            result = _maybe_full_fallback(challenge, result, debug=debug)
     else:
         result = _solve_challenge_once(challenge, debug=debug, ocr_profile=profile)
     return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)
