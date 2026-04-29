@@ -19,11 +19,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
+from antibot_image_solver.models import AntibotChallenge, OptionImage  # noqa: E402
+from antibot_image_solver.solver import solve_challenge  # noqa: E402
 from label_claimcoin_antibot import (  # noqa: E402
     DEFAULT_CLAIMCOIN_ROOT,
     DEFAULT_LABEL_ROOT,
     auto_order,
+    best_text,
     build_queue_case,
+    load_capture,
     split_tokens,
 )
 
@@ -190,6 +194,42 @@ def job_status_data() -> dict[str, Any]:
     return {"status": "idle", "kind": None, "progress": 0, "message": "Belum ada job retuning/testing aktif.", "updated_at": None}
 
 
+
+def latest_solver_payload(data: dict[str, Any]) -> dict[str, Any]:
+    capture_rel = data.get("source_capture_path")
+    if not capture_rel:
+        raise HTTPException(status_code=400, detail="case has no source capture path")
+    capture_path = CLAIMCOIN_ROOT / str(capture_rel)
+    if not capture_path.exists():
+        raise HTTPException(status_code=404, detail="source capture not found")
+    capture = load_capture(capture_path)
+    challenge = capture.get("challenge") or {}
+    items = challenge.get("items") or []
+    solver_input = AntibotChallenge(
+        instruction_image_base64=str(challenge.get("main_image") or ""),
+        options=[OptionImage(id=str(item.get("id")), image_base64=str(item.get("image") or "")) for item in items],
+        domain_hint=str(challenge.get("domain_hint") or "claimcoin"),
+        request_id=str(data.get("case_id") or capture.get("attempt_id") or ""),
+    )
+    result = solve_challenge(solver_input, debug=True)
+    debug = result.debug.to_dict() if result.debug else {}
+    option_ocr = debug.get("option_ocr") or {}
+    question_ocr = debug.get("instruction_ocr") or []
+    return {
+        "success": result.success,
+        "status": result.status,
+        "question_text": best_text(question_ocr),
+        "question_tokens": list(result.tokens_detected or []),
+        "options_text": {str(k): best_text(v) for k, v in option_ocr.items()},
+        "submitted_answer_order": [str(x) for x in (result.ordered_ids or [])],
+        "confidence": result.confidence,
+        "tesseract_question_ocr": question_ocr,
+        "tesseract_option_ocr": option_ocr,
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+        "meta": result.meta,
+    }
+
 def image_url(image_path: str, q: str) -> str:
     return f"/images/{image_path.replace('images/', '')}?{q}"
 
@@ -266,6 +306,18 @@ def image(path: str, request: Request) -> Response:
     return Response(file.read_bytes(), media_type="image/png")
 
 
+@app.get("/case/{case_id}/latest-solver")
+def latest_solver(case_id: str, request: Request) -> dict[str, Any]:
+    require_auth(request)
+    _, data = load_case(case_id)
+    try:
+        return latest_solver_payload(data)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"success": False, "status": "error", "error_code": type(exc).__name__, "error_message": str(exc)}
+
+
 @app.get("/case/{case_id}", response_class=HTMLResponse)
 def case_page(case_id: str, request: Request) -> str:
     require_auth(request)
@@ -294,6 +346,7 @@ def case_page(case_id: str, request: Request) -> str:
     option_buttons = "".join([f"<button type='button' class='order-chip' data-id='{escape(oid)}'>ID {escape(oid)}</button>" for oid in option_ids])
     body = f"""
     <div class='top'><div><h1>{data['case_id']}</h1><div class='tag'>attempt {data['attempt_id']} • {data['verdict']} • confidence {current.get('confidence')}</div></div><a class='btn btn2' href='/?{q}'>Back</a></div>
+    <div class='card'><h2>Latest tuned solver</h2><div class='help'>Klik ini untuk rerun solver versi kode terbaru dari raw capture. Ini bukan nilai lama dari queue JSON.</div><p><button type='button' class='btn' id='run-latest-solver'>Run latest solver</button> <button type='button' class='btn btn2' id='apply-latest-solver' disabled>Apply latest result to fields</button></p><pre id='latest-solver-box'>Belum dijalankan.</pre></div>
     <form method='post' action='/case/{case_id}/save?{q}'>
     <div class='card'><h2>Question</h2><div class='help'><b>Yang diedit: Final question text.</b> List OCR di bawah itu cuma kandidat bacaan mentah. Kalau gambar memang bertulis <span class='mono'>rat, bat, owl</span>, isi field ini dengan <span class='mono'>rat, bat, owl</span>. Jangan edit list mentahnya.</div><img src='/images/{question_rel}?{q}'><label>Final question text</label><input class='watched-field' data-original='{escape(current.get('question_text') or '')}' data-check='question_correct' name='question_text' value='{escape(question_value)}'>
     <div class='changed-note'>Edited manually, checkbox auto-unchecked.</div>
@@ -314,6 +367,8 @@ def case_page(case_id: str, request: Request) -> str:
 const optionIds = {json.dumps(option_ids)};
 const solverTexts = {json.dumps(current.get('options_text', {}))};
 const solverOrder = {json.dumps(submitted)};
+const latestSolverUrl = "/case/{case_id}/latest-solver?{q}";
+let latestResult = null;
 const initialOrder = {json.dumps(order_value.split())};
 const hidden = document.getElementById('correct_order');
 const selected = document.getElementById('selected-order');
@@ -370,6 +425,52 @@ document.querySelectorAll('.use-solver-text').forEach((btn) => {{
     showToast(before === target.value ? 'Sudah sama dengan hasil solver' : 'Field diisi dari hasil solver');
   }});
 }});
+function setField(name, value) {{
+  const target = document.querySelector(`[name="${{name}}"]`);
+  if (!target) return;
+  target.value = value || '';
+  updateFieldState(target);
+  target.dispatchEvent(new Event('input', {{ bubbles: true }}));
+}}
+function applyLatestSolver() {{
+  if (!latestResult || !latestResult.success) {{ showToast('Latest solver belum ada atau gagal'); return; }}
+  setField('question_text', latestResult.question_text || '');
+  Object.entries(latestResult.options_text || {{}}).forEach(([id, text]) => setField(`option_${{id}}`, text || ''));
+  order = (latestResult.submitted_answer_order || []).filter(id => optionIds.includes(String(id))).map(String);
+  renderOrder();
+  showToast('Latest solver result diterapkan ke field');
+}}
+const runLatestBtn = document.getElementById('run-latest-solver');
+const applyLatestBtn = document.getElementById('apply-latest-solver');
+const latestBox = document.getElementById('latest-solver-box');
+if (runLatestBtn) {{
+  runLatestBtn.addEventListener('click', async () => {{
+    runLatestBtn.disabled = true;
+    latestBox.textContent = 'Running latest solver...';
+    try {{
+      const res = await fetch(latestSolverUrl, {{ credentials: 'same-origin' }});
+      latestResult = await res.json();
+      const summary = {{
+        success: latestResult.success,
+        status: latestResult.status,
+        confidence: latestResult.confidence,
+        question_text: latestResult.question_text,
+        options_text: latestResult.options_text,
+        submitted_answer_order: latestResult.submitted_answer_order,
+        error: latestResult.error_message || latestResult.error_code || null
+      }};
+      latestBox.textContent = JSON.stringify(summary, null, 2);
+      applyLatestBtn.disabled = !latestResult.success;
+      showToast(latestResult.success ? 'Latest solver selesai' : 'Latest solver gagal');
+    }} catch (err) {{
+      latestBox.textContent = 'Latest solver error: ' + err;
+      showToast('Latest solver error');
+    }} finally {{
+      runLatestBtn.disabled = false;
+    }}
+  }});
+}}
+if (applyLatestBtn) applyLatestBtn.addEventListener('click', applyLatestSolver);
 </script>
     """
     return html_page(case_id, body)

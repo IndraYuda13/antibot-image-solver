@@ -212,3 +212,21 @@
 - Do not casually remove:
   - The stats page separates raw live server verdicts from label-based offline evaluation because they answer different questions.
   - The retuning/testing progress panel is currently a foundation, not a runner. It reads `state/antibot-labeling/jobs/solver_eval_status.json` when future jobs write it.
+
+
+## 2026-04-29 - Label studio latest-solver rerun
+
+- Trigger evidence:
+  - Boskuu clarified that the labeling workflow needs a real `Run latest solver` action, not just reusing `current_solver` values stored in the queue JSON, so he can test the newest tuned OCR/matcher before deciding whether to correct or submit.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+- What changed:
+  - Added `latest_solver_payload()` to rebuild an `AntibotChallenge` from the raw source capture and run the current `solve_challenge(..., debug=True)` code path.
+  - Added `GET /case/{case_id}/latest-solver` returning latest question text, option texts, answer order, confidence, OCR debug, and errors.
+  - Added case-page controls: `Run latest solver`, result preview JSON, and `Apply latest result to fields` so labels can start from the newest tuned solver output.
+- Verification:
+  - Local latest-solver endpoint returned a successful solved payload on a queued case.
+  - Public latest-solver endpoint returned `success`, `question_text`, `submitted_answer_order`, and `confidence` through `claimlabel.indrayuda.my.id`.
+  - Test suite: `31 passed`.
+- Do not casually remove:
+  - Keep old `current_solver` values as historical queue evidence. The latest solver panel is intentionally separate so old-vs-new behavior can be compared.
