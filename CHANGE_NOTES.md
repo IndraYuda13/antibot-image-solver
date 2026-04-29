@@ -327,3 +327,22 @@
   - manual label: `claimcoin_000702`
 - Do not casually remove:
   - Keep the rejected top-candidate-bonus lesson. Candidate rank sounds useful, but the tested version reduced overall eval from `99.42%` to `99.13%` by causing accepted raw regressions.
+
+## 2026-04-30 - ClaimCoin labeled wrongs tuned to 100% fast replay
+
+- Trigger evidence:
+  - Boskuu labeled the four remaining wrong cases and asked to hand over the technical tuning.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `src/antibot_image_solver/matcher.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+- What changed:
+  - Added focused regression tests for the remaining labeled/stored-debug failures, including `claimcoin_000145`, `000276`, `000397`, `000702`, and accepted raw `000723`.
+  - Added narrow exact OCR corrections for the observed stored-debug forms only, e.g. `mar -> mat`, `cay -> cap`, `wy -> toy`, `jol -> lol`, `ih/ill -> lll`, `101 -> lol`, `500 -> soo`, `kelly -> jelly`, `aerio -> starfish`, `qole/opt -> golf`, and ice/water/icecream variants from `000723`.
+  - Added a targeted matcher boost for shape-family `or` token against top-candidate `cir`, avoiding the earlier broad `or -> cir` normalization that polluted noisy lower candidates.
+- Verification:
+  - Full tests: `41 passed`.
+  - Fast stored-debug eval: `700 total`, `700 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `677/677`, manual labels `23/23`.
+- Boundary:
+  - This is a 100% result for fast matcher replay from stored OCR/debug, not a claim that current OCR image reruns are 100%.

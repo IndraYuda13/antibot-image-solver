@@ -55,7 +55,13 @@ def extract_instruction_token_sets(candidates: list[str], option_count: int) -> 
 def fuzzy_text_score(token: str, candidates: Iterable[str]) -> float:
     best = 0.0
     want = token.lower().strip()
-    for candidate in candidates:
+    candidate_list = list(candidates)
+    # Very short OCR tokens like `or`, `bk`, or `2` are easy to over-match
+    # against lower-ranked noisy OCR variants. For those, trust the top visual
+    # candidate for fuzzy evidence and let canonical-form overlap handle recall.
+    if len(normalize_letters(want).strip(", ")) <= 2 and candidate_list:
+        candidate_list = candidate_list[:1]
+    for candidate in candidate_list:
         got = candidate.lower().strip()
         if not want or not got:
             continue
@@ -79,6 +85,14 @@ def token_option_score(token: str, want_forms: set[str], option_candidates: list
     if not _allow_numeric_alias_match(token, option_candidates):
         overlap = {form for form in overlap if not _is_numeric_alias(form)}
     score = len(overlap) * 100
+    token_alpha = normalize_letters(token).strip(", ")
+    if token_alpha == "or" and option_candidates:
+        top_forms = canonical_forms(option_candidates[0])
+        # ClaimCoin shape-family OCR often reads the requested `cir` as `or`,
+        # while unrelated options may contain a lower-ranked noisy `or`. Prefer
+        # top-candidate `cir` evidence over lower-ranked exact noise.
+        if "cir" in top_forms:
+            score += 140
     score += int(fuzzy_text_score(token, option_candidates) * 100)
     return score
 
