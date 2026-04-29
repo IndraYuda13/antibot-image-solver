@@ -173,3 +173,23 @@
   - Cloudflared quick tunnel was attempted in screen `claimlabel-tunnel`, but the generated trycloudflare URLs returned Cloudflare-side `404` and did not route to the local app, despite cloudflared reporting registered tunnel connections. Treat this as a tunnel routing blocker, not an app failure.
 - Do not casually remove:
   - Token auth. Even quick tunnel URLs must not expose labeling writes without a secret token.
+
+## 2026-04-29 - Label studio order UX and review pages
+
+- Trigger evidence:
+  - Boskuu was confused whether to edit the OCR candidate list or the final text field, and wanted answer ordering to be click-based instead of manual typing.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+- What changed:
+  - Renamed labeling fields to make the write target explicit: `Final question text` and `Final option text`.
+  - Moved raw OCR candidate arrays behind read-only expandable evidence sections so users do not edit the wrong thing.
+  - Added click-to-arrange final answer order chips with reset and `Use solver order` controls.
+  - Save now redirects to a labeled-case review page.
+  - Added `/labeled` and `/labeled/{case_id}` review pages for checking saved labels.
+- Verification:
+  - Public case page renders the new guidance and OCR read-only sections.
+  - Public `/labeled` page renders `Review labeled cases`.
+  - Local save smoke test with a temporary case preserved final order `2650 8668 4887` in the review page, then the temporary label was deleted.
+  - Test suite: `31 passed`.
+- Do not casually remove:
+  - OCR candidate arrays are intentionally shown as read-only evidence. The final text inputs are the ground-truth label fields.
