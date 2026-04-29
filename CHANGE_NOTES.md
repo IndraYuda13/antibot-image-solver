@@ -267,3 +267,20 @@
   - Test suite: `31 passed`.
 - Do not casually remove:
   - Keep subprocess isolation for eval jobs. Direct in-thread OCR can make progress appear frozen and makes stop behavior poor.
+
+## 2026-04-29 - Eval job multi-worker controls and live stats
+
+- Trigger evidence:
+  - Boskuu asked whether eval could use a small amount of multithreading, starting with 2 workers, and wanted live progress stats beyond only `4/675`.
+- Files touched:
+  - `tools/label_claimcoin_web.py`
+- What changed:
+  - Eval jobs now support configurable `workers` with a guarded range `1..3`.
+  - Job status now includes live `done`, `remaining`, `running`, `running_cases`, `workers`, `ok`, `wrong`, `errors`, `success_rate`, `by_source`, and system load (`load1/load5/load15/cpu_count`).
+  - `/stats` now renders live OK/Wrong/Error/Success/Running cards while a job is in progress.
+- Verification / CPU smoke:
+  - A 2-worker smoke run started two simultaneous OCR subprocesses and status showed both running cases.
+  - On this 4-core VPS, 2 workers pushed load high (`load1` rose around `5.6-7.3`), so the smoke was stopped and leftover tesseract workers were killed.
+  - Conclusion: multi-worker support works, but full 675-case eval should use 1 worker by default on this VPS unless Boskuu explicitly accepts higher CPU load.
+- Do not casually remove:
+  - Keep the `workers` guard at max 3. Tesseract OCR can spike heavily and saturate this VPS quickly.

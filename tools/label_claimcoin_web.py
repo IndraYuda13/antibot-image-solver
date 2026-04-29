@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
+import os
 from html import escape
 import secrets
 import sqlite3
@@ -284,147 +286,190 @@ def latest_solver_payload_subprocess(data: dict[str, Any], timeout_seconds: int 
         raise RuntimeError((proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[-1000:])
     return json.loads(proc.stdout)
 
-def run_eval_job(job_id: str, *, include_accepted: bool, include_labeled: bool, accepted_limit: int | None = None) -> None:
+def eval_one_item(item: dict[str, Any]) -> dict[str, Any]:
+    latest = latest_solver_payload_subprocess(item)
+    actual = [str(x) for x in (latest.get("submitted_answer_order") or [])]
+    expected = [str(x) for x in (item.get("expected_order") or [])]
+    passed = bool(expected) and actual == expected
+    return {
+        "case_id": item["case_id"],
+        "source": item["source"],
+        "expected_order": expected,
+        "actual_order": actual,
+        "pass": passed,
+        "confidence": latest.get("confidence"),
+        "question_text": latest.get("question_text"),
+        "options_text": latest.get("options_text"),
+        "error": None,
+    }
+
+
+def source_totals(cases: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    out: dict[str, dict[str, int]] = {}
+    for item in cases:
+        src = item["source"]
+        out.setdefault(src, {"total": 0, "done": 0, "ok": 0, "wrong": 0, "errors": 0})
+        out[src]["total"] += 1
+    return out
+
+
+def live_system_load() -> dict[str, Any]:
+    try:
+        load1, load5, load15 = os.getloadavg()
+        return {"load1": round(load1, 2), "load5": round(load5, 2), "load15": round(load15, 2), "cpu_count": os.cpu_count()}
+    except OSError:
+        return {"cpu_count": os.cpu_count()}
+
+
+def run_eval_job(
+    job_id: str,
+    *,
+    include_accepted: bool,
+    include_labeled: bool,
+    accepted_limit: int | None = None,
+    workers: int = 2,
+) -> None:
     JOB_STOP_PATH.unlink(missing_ok=True)
     started = time.time()
+    workers = max(1, min(int(workers or 2), 3))
     try:
         cases = build_eval_cases(include_accepted, include_labeled, accepted_limit)
         total = len(cases)
-        ok = wrong = errors = 0
-        by_source: dict[str, dict[str, int]] = {}
+        ok = wrong = errors = done = 0
+        by_source = source_totals(cases)
         failures: list[dict[str, Any]] = []
-        report_path = JOB_REPORTS_DIR / f"{job_id}.json"
-        write_job_status({
-            "job_id": job_id,
-            "status": "running",
-            "kind": "stable_eval",
-            "progress": 0,
-            "message": f"Prepared {total} cases. Starting solver eval...",
-            "total": total,
-            "done": 0,
-            "ok": 0,
-            "wrong": 0,
-            "errors": 0,
-            "report_path": str(report_path),
-            "can_stop": True,
-        })
         results: list[dict[str, Any]] = []
-        for idx, item in enumerate(cases, 1):
-            if JOB_STOP_PATH.exists():
-                write_job_status({
-                    "job_id": job_id,
-                    "status": "stopped",
-                    "kind": "stable_eval",
-                    "progress": int(((idx - 1) / total) * 100) if total else 100,
-                    "message": "Stopped by user.",
-                    "total": total,
-                    "done": idx - 1,
-                    "ok": ok,
-                    "wrong": wrong,
-                    "errors": errors,
-                    "report_path": str(report_path),
-                    "can_stop": False,
-                })
-                break
-            source = item["source"]
-            by_source.setdefault(source, {"total": 0, "ok": 0, "wrong": 0, "errors": 0})
-            by_source[source]["total"] += 1
-            write_job_status({
+        running_cases: dict[concurrent.futures.Future, dict[str, Any]] = {}
+        report_path = JOB_REPORTS_DIR / f"{job_id}.json"
+
+        def status_payload(message: str, *, status: str = "running", can_stop: bool = True) -> dict[str, Any]:
+            return {
                 "job_id": job_id,
-                "status": "running",
+                "status": status,
                 "kind": "stable_eval",
-                "progress": int(((idx - 1) / total) * 100) if total else 100,
-                "message": f"Evaluating {idx}/{total}: {item.get('case_id')}",
+                "progress": int((done / total) * 100) if total else 100,
+                "message": message,
                 "total": total,
-                "done": idx - 1,
+                "done": done,
+                "remaining": max(total - done, 0),
+                "running": len(running_cases),
+                "running_cases": [item.get("case_id") for item in running_cases.values()],
+                "workers": workers,
                 "ok": ok,
                 "wrong": wrong,
                 "errors": errors,
-                "success_rate": pct(ok, idx - 1),
+                "success_rate": pct(ok, done),
                 "by_source": by_source,
                 "failures_sample": failures,
                 "report_path": str(report_path),
-                "can_stop": True,
-            })
-            try:
-                latest = latest_solver_payload_subprocess(item)
-                actual = [str(x) for x in (latest.get("submitted_answer_order") or [])]
-                expected = [str(x) for x in (item.get("expected_order") or [])]
-                passed = bool(expected) and actual == expected
-                if passed:
-                    ok += 1
-                    by_source[source]["ok"] += 1
-                else:
-                    wrong += 1
-                    by_source[source]["wrong"] += 1
-                    if len(failures) < 80:
-                        failures.append({
-                            "case_id": item["case_id"],
-                            "source": source,
-                            "expected_order": expected,
-                            "actual_order": actual,
-                            "confidence": latest.get("confidence"),
-                            "question_text": latest.get("question_text"),
-                            "options_text": latest.get("options_text"),
-                        })
-                results.append({
-                    "case_id": item["case_id"],
-                    "source": source,
-                    "expected_order": expected,
-                    "actual_order": actual,
-                    "pass": passed,
-                    "confidence": latest.get("confidence"),
-                    "error": None,
-                })
-            except Exception as exc:
-                errors += 1
-                by_source[source]["errors"] += 1
-                err = {"case_id": item.get("case_id"), "source": source, "error": type(exc).__name__, "message": str(exc)}
-                results.append({**err, "pass": False})
-                if len(failures) < 80:
-                    failures.append(err)
-            if idx % 5 == 0 or idx == total:
-                write_job_status({
-                    "job_id": job_id,
-                    "status": "running",
-                    "kind": "stable_eval",
-                    "progress": int((idx / total) * 100) if total else 100,
-                    "message": f"Evaluated {idx}/{total}: ok={ok}, wrong={wrong}, errors={errors}",
-                    "total": total,
-                    "done": idx,
-                    "ok": ok,
-                    "wrong": wrong,
-                    "errors": errors,
-                    "success_rate": pct(ok, idx),
-                    "by_source": by_source,
-                    "failures_sample": failures,
-                    "report_path": str(report_path),
-                    "can_stop": True,
-                })
-        else:
-            summary = {
-                "job_id": job_id,
-                "status": "completed",
-                "kind": "stable_eval",
-                "started_at": started,
-                "finished_at": time.time(),
-                "total": total,
-                "ok": ok,
-                "wrong": wrong,
-                "errors": errors,
-                "success_rate": pct(ok, total),
-                "by_source": by_source,
-                "failures_sample": failures,
-                "results": results,
+                "can_stop": can_stop,
+                "system_load": live_system_load(),
             }
-            report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
-            write_job_status({
-                **{k: v for k, v in summary.items() if k != "results"},
-                "progress": 100,
-                "message": f"Completed {total}: success={pct(ok, total)}%, wrong={wrong}, errors={errors}",
-                "report_path": str(report_path),
-                "can_stop": False,
-            })
+
+        write_job_status(status_payload(f"Prepared {total} cases. Starting {workers}-worker solver eval..."))
+        next_index = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            while (next_index < total or running_cases) and not JOB_STOP_PATH.exists():
+                while next_index < total and len(running_cases) < workers and not JOB_STOP_PATH.exists():
+                    item = cases[next_index]
+                    fut = executor.submit(eval_one_item, item)
+                    running_cases[fut] = item
+                    next_index += 1
+                write_job_status(status_payload(f"Running {len(running_cases)} case(s), done {done}/{total}: ok={ok}, wrong={wrong}, errors={errors}"))
+                if not running_cases:
+                    break
+                finished, _ = concurrent.futures.wait(running_cases.keys(), timeout=3, return_when=concurrent.futures.FIRST_COMPLETED)
+                for fut in finished:
+                    item = running_cases.pop(fut)
+                    source = item["source"]
+                    done += 1
+                    by_source[source]["done"] += 1
+                    try:
+                        result = fut.result()
+                        if result.get("pass"):
+                            ok += 1
+                            by_source[source]["ok"] += 1
+                        else:
+                            wrong += 1
+                            by_source[source]["wrong"] += 1
+                            if len(failures) < 80:
+                                failures.append({
+                                    "case_id": result.get("case_id"),
+                                    "source": source,
+                                    "expected_order": result.get("expected_order"),
+                                    "actual_order": result.get("actual_order"),
+                                    "confidence": result.get("confidence"),
+                                    "question_text": result.get("question_text"),
+                                    "options_text": result.get("options_text"),
+                                })
+                        results.append(result)
+                    except Exception as exc:
+                        errors += 1
+                        by_source[source]["errors"] += 1
+                        err = {"case_id": item.get("case_id"), "source": source, "error": type(exc).__name__, "message": str(exc)}
+                        results.append({**err, "pass": False})
+                        if len(failures) < 80:
+                            failures.append(err)
+                    if done % 3 == 0 or done == total:
+                        write_job_status(status_payload(f"Evaluated {done}/{total}: ok={ok}, wrong={wrong}, errors={errors}"))
+
+            if JOB_STOP_PATH.exists():
+                write_job_status(status_payload("Stop requested. Waiting currently running case(s) to timeout/finish...", can_stop=False))
+                for fut, item in list(running_cases.items()):
+                    try:
+                        result = fut.result(timeout=90)
+                        source = item["source"]
+                        done += 1
+                        by_source[source]["done"] += 1
+                        if result.get("pass"):
+                            ok += 1
+                            by_source[source]["ok"] += 1
+                        else:
+                            wrong += 1
+                            by_source[source]["wrong"] += 1
+                        results.append(result)
+                    except Exception as exc:
+                        source = item["source"]
+                        done += 1
+                        by_source[source]["done"] += 1
+                        errors += 1
+                        by_source[source]["errors"] += 1
+                        err = {"case_id": item.get("case_id"), "source": source, "error": type(exc).__name__, "message": str(exc)}
+                        results.append({**err, "pass": False})
+                        if len(failures) < 80:
+                            failures.append(err)
+                write_job_status(status_payload("Stopped by user.", status="stopped", can_stop=False))
+                return
+
+        summary = {
+            "job_id": job_id,
+            "status": "completed",
+            "kind": "stable_eval",
+            "started_at": started,
+            "finished_at": time.time(),
+            "total": total,
+            "done": done,
+            "workers": workers,
+            "ok": ok,
+            "wrong": wrong,
+            "errors": errors,
+            "success_rate": pct(ok, done),
+            "by_source": by_source,
+            "failures_sample": failures,
+            "results": results,
+            "system_load": live_system_load(),
+        }
+        report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+        write_job_status({
+            **{k: v for k, v in summary.items() if k != "results"},
+            "progress": 100,
+            "remaining": 0,
+            "running": 0,
+            "running_cases": [],
+            "message": f"Completed {done}: success={pct(ok, done)}%, wrong={wrong}, errors={errors}",
+            "report_path": str(report_path),
+            "can_stop": False,
+        })
     except Exception as exc:
         write_job_status({
             "job_id": job_id,
@@ -764,6 +809,7 @@ def jobs_start_eval(
     include_accepted: str = Form("1"),
     include_labeled: str = Form("1"),
     accepted_limit: str = Form(""),
+    workers: int = Form(2),
 ) -> RedirectResponse:
     require_auth(request)
     global JOB_THREAD
@@ -789,6 +835,7 @@ def jobs_start_eval(
                 "include_accepted": include_accepted == "1",
                 "include_labeled": include_labeled == "1",
                 "accepted_limit": limit,
+                "workers": workers,
             },
             daemon=True,
         )
@@ -834,9 +881,9 @@ def stats_page(request: Request) -> str:
       {stat_card('Labeled total', labels['total'])}{stat_card('Checked', labels['checked'])}{stat_card('Solver exact', labels['solver_exact'], 'good')}{stat_card('Corrected by human', labels['corrected'], 'bad')}{stat_card('Label exact rate', str(labels['label_success_rate']) + '%', 'good')}
     </div></div>
     <div class='card'><h2>Retuning / testing job</h2><div class='help'>Fondasi job progress sudah ada. Tombol start retuning/testing akan disambung ke runner background berikutnya, jadi kalau web ditutup status tetap bisa dibaca lagi dari sini.</div>
-      <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Kind', job.get('kind') or '-')}{stat_card('Progress', str(progress) + '%')}{stat_card('Message', job.get('message') or '-')}</div>
+      <div class='grid'>{stat_card('Status', job.get('status'))}{stat_card('Progress', str(progress) + '%')}{stat_card('Done / Total', str(job.get('done', 0)) + ' / ' + str(job.get('total', 0)))}{stat_card('Running', job.get('running', 0))}{stat_card('OK', job.get('ok', 0), 'good')}{stat_card('Wrong', job.get('wrong', 0), 'bad')}{stat_card('Errors', job.get('errors', 0), 'warn')}{stat_card('Live success', str(job.get('success_rate', 0)) + '%', 'good')}</div>
       <div class='progress'><span style='width:{progress}%'></span></div>
-      <form method='post' action='/jobs/start-eval?{q}'><input type='hidden' name='include_accepted' value='1'><input type='hidden' name='include_labeled' value='1'><label>Accepted raw limit, kosong = semua accepted selain yang sudah dilabel</label><input name='accepted_limit' value=''><p><button>Start full eval: accepted success raw + labels</button></p></form>
+      <form method='post' action='/jobs/start-eval?{q}'><input type='hidden' name='include_accepted' value='1'><input type='hidden' name='include_labeled' value='1'><label>Accepted raw limit, kosong = semua accepted selain yang sudah dilabel</label><input name='accepted_limit' value=''><label>Workers, default 2, max 3</label><select name='workers'><option value='2' selected>2 workers, recommended</option><option value='1'>1 worker</option><option value='3'>3 workers, heavier</option></select><p><button>Start full eval: accepted success raw + labels</button></p></form>
       <form method='post' action='/jobs/stop?{q}'><p><button class='danger' {'disabled' if not job.get('can_stop') else ''}>Stop current job</button></p></form>
       <details><summary>Failure sample / raw status JSON</summary><pre id='job-json'>{escape(json.dumps(job, ensure_ascii=False, indent=2))}</pre></details>
     </div>
