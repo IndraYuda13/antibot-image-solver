@@ -71,3 +71,24 @@
 - Do not casually remove:
   - The confidence gate on turbo results. Lower thresholds around `0.55` replayed accepted captures incorrectly on two live samples.
   - The Tesseract timeout. It is the guard against long OCR spikes.
+
+## 2026-04-29 - ddddocr offline benchmark lane
+
+- Trigger evidence:
+  - Boskuu asked whether replacing Tesseract with `ddddocr` could improve ClaimCoin AntiBot accuracy toward 98%++.
+  - Live post-fallback rejects still showed OCR ambiguity and tie cases, especially id `527`.
+- Files touched:
+  - `tools/benchmark_ddddocr_claimcoin.py`
+- What changed:
+  - Added an offline benchmark script that runs `ddddocr` on stored ClaimCoin capture JSON, compares new ordered ids against accepted-sample ground truth, and writes JSONL output for review.
+  - Installed `ddddocr` only in the project venv for testing. It is not promoted to a runtime dependency yet.
+- Benchmark result:
+  - `accepted_fail_ids` set: 19/19 errors, 0 accepted passes.
+  - `rejects` set: 66/66 errors.
+  - `latest_accepted` guard set: 80/80 errors, 0 accepted passes.
+  - Root cause: direct `ddddocr` OCR outputs mostly concatenated/noisy strings without token separators, e.g. `zulzPzg`, `3av9c9`, `cuppugwjo`, so the current three-token matcher cannot extract ordered instruction tokens.
+- Decision:
+  - Do not replace Tesseract with raw `ddddocr`.
+  - If revisited, use `ddddocr` only as a low-level character evidence source with a separate segmentation/sequence alignment layer, not as a drop-in OCR provider.
+- Do not casually remove:
+  - The negative benchmark note. It prevents re-trying raw ddddocr as a drop-in and wasting live accuracy.
