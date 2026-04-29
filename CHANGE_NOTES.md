@@ -420,3 +420,22 @@
   - Breakdown: accepted-success raw `708/708`, manual labels `68/68`.
 - Boundary:
   - This is fast stored-debug matcher replay, not full current-OCR image rerun.
+
+## 2026-04-30 - Live reject 807 and post-restart window reset
+
+- Trigger evidence:
+  - Live post-upgrade stats `id >= 772` grew from 3 rejects to 4 rejects after `claimcoin_000807` failed.
+  - Boskuu labeled `claimcoin_000807`; fast eval then showed three manual-label wrongs: `000788`, `000797`, and `000807`.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+  - `tools/label_claimcoin_web.py` after restart baseline reset.
+- What changed:
+  - Added regression coverage for `000788`, `000797`, and `000807`.
+  - Added narrow OCR exact corrections for the newly labeled cases: `desh/085/dé@ss`, `9pu/nat/@y\\`, and `vt/vn/viv` families.
+- Verification:
+  - Focus matcher tests: `25 passed`.
+  - Fast stored-debug eval: `785 total`, `785 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `714/714`, manual labels `71/71`.
+- Boundary:
+  - Post-tuning stats window is reset after service restart so live rate reflects only the newly deployed solver version.

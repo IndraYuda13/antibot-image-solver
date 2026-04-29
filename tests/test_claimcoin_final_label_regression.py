@@ -106,3 +106,18 @@ def test_claimcoin_bulk_manual_labels_from_relabeling_pass():
     ]
     for question, options, expected in cases:
         assert _solve(question, options) == expected
+
+
+def test_claimcoin_latest_live_reject_labels_from_772_window():
+    assert _solve(
+        ["class, desh, bag"],
+        {"5482": ["085"], "6852": ["dé@ss"], "7756": ["b@g"]},
+    ) == ["6852", "5482", "7756"]
+    assert _solve(
+        ["net, 9pu, api"],
+        {"1560": ["gpu"], "8170": ["@y\\"], "9809": ["nat"]},
+    ) == ["9809", "1560", "8170"]
+    assert _solve(
+        ["uti, urn, Ulu"],
+        {"1706": ["vn"], "2188": ["vt"], "3378": ["viv"]},
+    ) == ["2188", "1706", "3378"]
