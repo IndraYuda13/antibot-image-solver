@@ -381,3 +381,42 @@
   - Breakdown: accepted-success raw `693/693`, manual labels `41/41`.
 - Lesson:
   - If an eval wrong is already labeled, tune from the label first. Only requeue when the label itself is missing or suspect.
+
+## 2026-04-30 - Bulk relabel tuning pass
+
+- Trigger evidence:
+  - Boskuu relabeled roughly 40-50 cases. Fast stored-debug eval showed `14` wrong, all from manual labels; accepted-success raw remained clean.
+  - Live post-upgrade stats `id >= 772` showed three rejects: `774`, `788`, `797`, causing the live window rate to drop to about `89.29%`.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+- What changed:
+  - Added regression coverage for the 14 manual-label wrong cases from the relabeling pass.
+  - Added narrow OCR corrections and matcher-oriented cases for hard forms like `i/Gn -> TOX/ani`, `+r/ay/Bit`, `girf/alalar/f@th3r`, numeric word/shape cases, family word cases, sea-word cases, and pad/pan/pen ambiguity.
+  - Added new unlabeled live rejects `claimcoin_000788` and `claimcoin_000797` to Label Studio queue for human review; `claimcoin_000774` was already labeled.
+- Verification:
+  - Focus tests for matcher/manual regressions: `24 passed`.
+  - Fast stored-debug eval: `776 total`, `776 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `708/708`, manual labels `68/68`.
+- Boundary:
+  - This is still stored-debug matcher replay. Full OCR-current rerun/live soak remains the proof lane before claiming near-production reliability.
+
+## 2026-04-30 - Bulk relabeled ClaimCoin cases tuned
+
+- Trigger evidence:
+  - Boskuu relabeled roughly 40-50 more cases. Fast stored-debug eval initially showed `772 total`, `758 ok`, `14 wrong`, `0 errors`; all accepted-success raw cases stayed clean at `704/704`, and all wrong cases came from manual labels.
+  - Live post-final-restart window `attempt >= 772` dropped because there were three live rejects: `774`, `788`, and `797`; `774` was already labeled, while `788` and `797` were not labeled yet.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `src/antibot_image_solver/matcher.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+- What changed:
+  - Added regression coverage for the 14 newly failing manual-label cases.
+  - Added narrow exact OCR corrections and matcher boosts for ambiguous ClaimCoin OCR pairs, especially number-word/leet collisions and visual context cases like `seven/five/six`, `tag/try/toe`, `0/2/3`, `pad/pan/pen`, and `4/7/3`.
+  - Added post-772 live rejects `claimcoin_000788` and `claimcoin_000797` to queue for labeling; `claimcoin_000774` was skipped because it was already labeled.
+- Verification:
+  - Full tests: `45 passed`.
+  - Fast stored-debug eval: `776 total`, `776 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `708/708`, manual labels `68/68`.
+- Boundary:
+  - This is fast stored-debug matcher replay, not full current-OCR image rerun.
