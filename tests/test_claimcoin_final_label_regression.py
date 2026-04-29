@@ -67,3 +67,21 @@ def test_claimcoin_post_tuning_reject_labels_match_manual_ground_truth():
         ["od, rot, wad"],
         {"4943": ["nid"], "5775": ["ned"], "6156": ["pot"]},
     ) == ["4943", "6156", "5775"]
+
+
+def test_claimcoin_already_labeled_regressions_do_not_need_requeue():
+    assert _solve(
+        ["aT, &VE, 299", "Lat, eve, 299", "OT, ONG, 24g"],
+        {"1826": ["3e@t", "3@t", "set"], "3617": ["3u3", "ua", "dud"], "9347": ["39g", "399", "499", "gg"]},
+    ) == ["1826", "3617", "9347"]
+    assert _solve(
+        ["wir, 124, ice"],
+        {"1969": ["wir"], "4015": ["\\c3"], "9275": ["te"]},
+    ) == ["1969", "9275", "4015"]
+
+
+def test_claimcoin_000489_accepted_raw_sky_ice_air_regression():
+    assert _solve(
+        ["SKY, IC, alr"],
+        {"7130": ["oky"], "4316": ["\\c3"], "6305": ["ew"]},
+    ) == ["7130", "4316", "6305"]

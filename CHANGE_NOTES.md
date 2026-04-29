@@ -363,3 +363,21 @@
   - Breakdown: accepted-success raw `681/681`, manual labels `27/27`.
 - Boundary:
   - This is still a stored-debug matcher replay result; do not present it as full current-OCR end-to-end accuracy.
+
+## 2026-04-30 - Already-labeled eval wrongs fixed without requeue
+
+- Trigger evidence:
+  - Boskuu pointed out `claimcoin_000500` and `claimcoin_000774` had already been labeled, so they should not be requeued as if new human input was needed.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+- What changed:
+  - Removed `claimcoin_000500` and `claimcoin_000774` from queue and tuned from their existing labels.
+  - Added regression coverage for the already-labeled `000500` stored-debug OCR variants and for accepted raw `000489` that surfaced during rerun.
+  - Added narrow OCR exact corrections: `124 -> tea`, `te -> tea`, `\\c3 -> ice`, `wir -> wtr`, `lat/at -> eat`, `299/39g -> egg`, `3u3 -> eve`, `3e@t -> eat`, `ic -> ice`, `alr -> air`, `oky -> sky`.
+- Verification:
+  - Full tests: `44 passed`.
+  - Fast stored-debug eval: `734 total`, `734 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `693/693`, manual labels `41/41`.
+- Lesson:
+  - If an eval wrong is already labeled, tune from the label first. Only requeue when the label itself is missing or suspect.
