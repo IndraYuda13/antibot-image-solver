@@ -48,3 +48,22 @@ def test_claimcoin_000723_stored_debug_matches_accepted_success_order():
         ["eCream, Warer, Ke"],
         {"3489": ["1c3cr34m"], "4188": ["3"], "9337": ["wr"]},
     ) == ["3489", "9337", "4188"]
+
+
+def test_claimcoin_post_tuning_reject_labels_match_manual_ground_truth():
+    assert _solve(
+        ["sad, sky, say"],
+        {"3950": ["Dky"], "5417": ["say"], "8140": ["5@q"]},
+    ) == ["8140", "3950", "5417"]
+    assert _solve(
+        ["yum, you, yew"],
+        {"2064": ["yvM"], "4689": ["pw"], "5721": ["yOv"]},
+    ) == ["2064", "5721", "4689"]
+    assert _solve(
+        ["air, hot, fog"],
+        {"1922": ["ew"], "2363": ["hot"], "3541": ["£04"]},
+    ) == ["1922", "2363", "3541"]
+    assert _solve(
+        ["od, rot, wad"],
+        {"4943": ["nid"], "5775": ["ned"], "6156": ["pot"]},
+    ) == ["4943", "6156", "5775"]

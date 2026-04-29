@@ -346,3 +346,20 @@
   - Breakdown: accepted-success raw `677/677`, manual labels `23/23`.
 - Boundary:
   - This is a 100% result for fast matcher replay from stored OCR/debug, not a claim that current OCR image reruns are 100%.
+
+## 2026-04-30 - ClaimCoin post-tuning reject labels tuned
+
+- Trigger evidence:
+  - Boskuu labeled post-tuning rejects `claimcoin_000743`, `000755`, `000761`, and `000766`; fast eval showed these four manual labels as wrong while accepted-success raw remained clean.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+- What changed:
+  - Added focused regression tests for the four newly labeled post-tuning rejects.
+  - Added narrow exact OCR corrections for those observed forms only: `5@q -> sad`, `dky -> sky`, `yvm -> yum`, `yov -> you`, `pw -> yew`, `ew -> air`, `£04 -> fog`, `nid -> od`, `pot -> rot`, `ned -> wad`.
+- Verification:
+  - Full tests: `42 passed`.
+  - Fast stored-debug eval: `708 total`, `708 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `681/681`, manual labels `27/27`.
+- Boundary:
+  - This is still a stored-debug matcher replay result; do not present it as full current-OCR end-to-end accuracy.

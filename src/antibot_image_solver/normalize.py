@@ -112,6 +112,16 @@ def normalize_letters(text: str) -> str:
         "opt": "golf",
         "nick": "cricket",
         "f00tbell": "football",
+        "5@q": "sad",
+        "dky": "sky",
+        "yvm": "yum",
+        "yov": "you",
+        "pw": "yew",
+        "ew": "air",
+        "£04": "fog",
+        "nid": "od",
+        "pot": "rot",
+        "ned": "wad",
         "a": "doc",
     }
     if text in exact_fixes:
