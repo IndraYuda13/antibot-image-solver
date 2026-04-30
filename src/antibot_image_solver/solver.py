@@ -7,6 +7,7 @@ from antibot_image_solver.matcher import MatchEntry, MatchError, solve_from_hypo
 from antibot_image_solver.models import AntibotChallenge, SolveDebug, SolveResult
 from antibot_image_solver.normalize import canonical_forms, guess_family
 from antibot_image_solver.ocr import OcrRuntimeError, get_ocr_profile, ocr_candidates_from_base64
+from antibot_image_solver.ranker_shadow import append_shadow_decision
 
 
 class SolverError(RuntimeError):
@@ -196,6 +197,15 @@ def _maybe_full_fallback(challenge: AntibotChallenge, result: SolveResult, *, de
     return result
 
 
+def _maybe_append_ranker_shadow(result: SolveResult, *, request_id: str | None = None) -> SolveResult:
+    log_path = os.getenv("ANTIBOT_RANKER_SHADOW_LOG", "").strip()
+    if not log_path:
+        return result
+    payload = append_shadow_decision(log_path, result, request_id=request_id)
+    result.meta["ranker_shadow"] = payload
+    return result
+
+
 def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture: CaptureRequest | None = None) -> SolveResult:
     if not challenge.instruction_image_base64:
         raise SolverInputError("instruction_image_base64 is required")
@@ -210,4 +220,5 @@ def solve_challenge(challenge: AntibotChallenge, *, debug: bool = False, capture
             result = _maybe_full_fallback(challenge, result, debug=debug)
     else:
         result = _solve_challenge_once(challenge, debug=debug, ocr_profile=profile)
+    result = _maybe_append_ranker_shadow(result, request_id=challenge.request_id)
     return _attach_capture(challenge, result, capture, include_debug=debug or capture is not None)
