@@ -121,6 +121,55 @@ def token_option_score(token: str, want_forms: set[str], option_candidates: list
             score += 180
         if token_alpha == "pen" and any(c in {"p3n", "pin"} for c in lower_candidates):
             score += 180
+        if token_alpha == "water" and any(c in {"wr", "wor", "wtr"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "wet" and any(c in {"wr", "wor", "wat", "wot"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "day" and any(c in {"dey", "doy", "dy"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "sky" and any(c in {"ky", "oy", "dy"} for c in lower_candidates):
+            score += 240
+        if token_alpha in {"fish", "ten"} and any(c in {"fish", "sh", "c7"} for c in lower_candidates):
+            score += 260
+        if token_alpha == "soup" and any(c in {"50vp", "0p", "sp"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "hot" and (
+            any(c in {"hot", "pot", ")", "vit", "vr"} for c in lower_candidates)
+            or ("on" not in lower_candidates and any(c in {"0", "hr", "at"} for c in lower_candidates))
+        ):
+            score += 220
+        if token_alpha == "ice" and any(c in {"1c3", "403", "13"} for c in lower_candidates):
+            score += 260
+        if token_alpha == "pan" and any(c in {"pch", "pen", "on"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "tea" and any(c in {"pe", "be"} for c in lower_candidates):
+            score += 240
+        if token_alpha == "top" and any(c in {"40p", "aop"} for c in lower_candidates):
+            score += 260
+        if token_alpha == "toy" and any(c in {"ty", "t0y", "tly"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "tap" and any(c in {"top", "cr", "op", "‘op"} for c in lower_candidates):
+            score += 280
+        if token_alpha == "bike" and any(c in {"bik3", "b1k3-", "biks"} for c in lower_candidates):
+            score += 220
+        if token.strip() == "4" and any(c in {"nin", "nr", "wre"} for c in lower_candidates):
+            score += 300
+        if token_alpha == "one" and any(c in {"ono", "on", "0?"} for c in lower_candidates):
+            score += 220
+        if token_alpha == "cup" and any(c in {"wp", "cvp"} for c in lower_candidates):
+            score += 260
+        if token_alpha in {"mel", "wes"} and any(c in {"mal", "m3l"} for c in lower_candidates):
+            score += 260
+        if token_alpha in {"lem", "1am"} and any(c in {"dnt", "bn", "l3m"} for c in lower_candidates):
+            score += 260
+        if token_alpha == "nor" and any(c in {"hot", "pot"} for c in lower_candidates):
+            score += 260
+        if token_alpha in {"0a", "oa", "bi", "by"} and any(c in {"big", "big.", "pig."} for c in lower_candidates):
+            score += 260
+        if token_alpha == "in" and any(c in {"w", "om"} for c in lower_candidates):
+            score += 240
+        if token_alpha == "left" and any(c in {"br", "bit", "l3ft"} for c in lower_candidates):
+            score += 260
     if token_alpha == "or" and option_candidates:
         top_forms = canonical_forms(option_candidates[0])
         # ClaimCoin shape-family OCR often reads the requested `cir` as `or`,

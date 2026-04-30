@@ -140,3 +140,22 @@ def test_claimcoin_post_813_live_reject_labels():
         ["hit. hen, hot", "hit. hen. hot"],
         {"1565": [")", "vr", "Vit", "Wr"], "2299": ["ht", "At", "vir"], "7497": ["h8n", "AB", "|", "‘ABn,"]},
     ) == ["2299", "7497", "1565"]
+
+
+def test_claimcoin_post_860_reject_labels_rootcause_batch():
+    cases = [
+        (["day, wel, sky", "day, wet, ahiy"], {"4389": ["ky", "oy", "DY"], "4663": ["wot", "wat", "—"], "7954": ["dey", "doy", "a"]}, ["7954", "4663", "4389"]),
+        (["24a, TEN, SOUP", "eG, TEN, SOUP", "egg, TEN, SOUP"], {"3357": ["399", "dog", "gg"], "5574": ["50vp", "0p", "Ve", "SP"], "9947": ["fish", "Fish", "Sh"]}, ["3357", "9947", "5574"]),
+        (["sea, wet, hot"], {"2865": ["0", "‘hr", "at"], "3616": ["wr", "wor", "wat"], "9340": ["53@", "a"]}, ["9340", "3616", "2865"]),
+        (["ice, pan, tea"], {"6816": ["pe", "Be", "BE"], "8147": ["PCh", "On", "Pen"], "8704": ["403", "13", "1c3"]}, ["8704", "8147", "6816"]),
+        (["ton, toy, fap", "top, toy, tap"], {"1300": ["40P", "for"], "3976": ["top"], "5982": ["ty"]}, ["1300", "5982", "3976"]),
+        (["ony, bke, bag", "diy, pKe, bag"], {"1824": ["beg", "bey"], "2156": ["ship", "“ship", "Teer"], "7249": ["bik3", "b1k3-", "biks"]}, ["2156", "7249", "1824"]),
+        (["avd, Tor, DUT", "and, Tor, pur"], {"3448": ["fOr"], "3624": ["byT", "‘bvT", "bvT"], "5816": ["@nd", "‘@nd", "@ind"]}, ["5816", "3448", "3624"]),
+        (["0, 4, 1", "0.41"], {"3160": ["nin", "nr", "he", "wre"], "4913": ["Z3r0", "23ro", "23r0"], "8921": ["Ono", "On", "0?"]}, ["4913", "3160", "8921"]),
+        (["cup, tap, toy"], {"7522": ["Cr", "Op", "‘Op"], "7882": ["t0y", "tly", "‘Oy"], "9586": ["wp", "OP", "Op"]}, ["9586", "7522", "7882"]),
+        (["POM, Wes, 1AM", "pom, Wey, (ean"], {"2256": ["pow,", "‘pom,"], "2354": ["dnt", "Bn"], "9027": ["mal"]}, ["2256", "9027", "2354"]),
+        (["nor, on, vi", "nor, on, 0A", "ror, on, bY", "nor, on, bi"], {"3867": ["big", "big.", "pig."], "5338": ["‘on", "on"], "8945": ["hot", "pot"]}, ["8945", "5338", "3867"]),
+        (["in, leCt, east"], {"1402": ["w", "om", "-"], "5934": ["Br", "Bit"], "8537": ["34st"]}, ["1402", "5934", "8537"]),
+    ]
+    for question, options, expected in cases:
+        assert _solve(question, options) == expected

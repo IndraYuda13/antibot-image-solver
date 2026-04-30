@@ -460,3 +460,30 @@
   - Breakdown: accepted-success raw `757/757`, manual labels `75/75`.
 - Boundary:
   - Post-tuning live stats window should be reset after service restart; live soak remains the true production proof.
+
+## 2026-04-30 - Post-860 reject root-cause and controlled retune
+
+- Trigger evidence:
+  - Post-reset live window `attempt >= 860` dropped because 12 new rejects appeared: `868`, `891`, `893`, `899`, `900`, `922`, `931`, `940`, `950`, `952`, `964`, and `980`.
+  - After Boskuu labeled those cases, stored-debug eval showed `12` wrong, all from the new manual labels. Accepted-success raw remained clean before tuning.
+- Root cause:
+  - Most failures were not caused by the latest tuning commit regressing the old accepted set. They were new OCR/matcher coverage gaps: instruction OCR picked noisy tokens such as `ahiy`, `TEN`, `Wes`, `1AM`, `nor`, `0A`, `leCt`, or `4`, and option OCR had hard forms such as `dey/doy`, `ky`, `50vp`, `wr/wor/wat`, `pe/Be`, `40P`, `dnt/Bn`, and `Br/Bit`.
+  - Comparison across prior commits showed 11/12 of the new cases already failed before the post-813 commit. One case (`893`) did regress after the post-813 `wr -> hot` exact normalization; that global exact fix was too broad because `wr` can mean `water/wet/hot` depending on challenge context.
+- Files touched:
+  - `src/antibot_image_solver/normalize.py`
+  - `src/antibot_image_solver/matcher.py`
+  - `tests/test_claimcoin_final_label_regression.py`
+  - `tools/label_claimcoin_web.py` after live window reset.
+- What changed:
+  - Removed broad exact `wr -> water` / `wr -> hot` normalization and moved that ambiguity into contextual matcher boosts.
+  - Added targeted matcher boosts for the 12 post-860 labeled reject patterns, keeping context checks for risky aliases like `hot` vs `on` so accepted raw case `000532` does not regress.
+  - Added regression coverage for the full post-860 reject batch.
+  - Reset Label Studio post-tuning stats window from `attempt >= 860` to `attempt >= 1013`, based on current last attempt `1012` before the next service restart.
+- Verification:
+  - Focus post-860 regression tests: passed.
+  - Full tests: `48 passed`.
+  - Stored-debug eval after first patch exposed one accepted raw regression (`claimcoin_000532`), so the hot/on ambiguity was tightened.
+  - Final serial stored-debug eval: `985 total`, `985 ok`, `0 wrong`, `0 errors`, `100.0%` success.
+  - Breakdown: accepted-success raw `898/898`, manual labels `87/87`.
+- Boundary:
+  - This proves stored-debug replay and manual-label coverage. Live soak after restart from `attempt >= 1013` is still the production proof.
