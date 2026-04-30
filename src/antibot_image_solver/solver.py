@@ -201,7 +201,8 @@ def _maybe_append_ranker_shadow(result: SolveResult, *, request_id: str | None =
     log_path = os.getenv("ANTIBOT_RANKER_SHADOW_LOG", "").strip()
     if not log_path:
         return result
-    payload = append_shadow_decision(log_path, result, request_id=request_id)
+    provider_command = os.getenv("ANTIBOT_RANKER_SHADOW_PROVIDER", "").strip() or None
+    payload = append_shadow_decision(log_path, result, request_id=request_id, provider_command=provider_command)
     result.meta["ranker_shadow"] = payload
     return result
 
